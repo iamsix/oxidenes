@@ -1,4 +1,11 @@
 target/
-nestest.nes
+*.nes
 *.swp
 *~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
