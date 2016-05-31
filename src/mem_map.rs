@@ -10,13 +10,15 @@ pub const RAM_LEN: u16 = 0x800;
 const _RAM_VIRTUAL_END: u16 = 0x1999;
 // do a  mod 0x800 to mirror 0x800 through 0x1999
 
-const _REGISTERS_START: u16  = 0x2000;
-const _REGISTERS_LEN: usize  = 0x8;
-const _REGISTERS_VIRTUAL_END: u16 = 0x1ff8;
+const _PPU_REGISTERS_START: u16  = 0x2000;
+const _PPU_REGISTERS_LEN: usize  = 0x8;
+const _PPU_REGISTERS_VIRTUAL_END: u16 = 0x1ff8;
+// http://wiki.nesdev.com/w/index.php/PPU_registers
 // do a mod 8 to get real addr
 
-const _REGISTERS2_START: u16 = 0x4000;
-const _REGISTERS2_LEN: usize = 0x20;
+const _APU_REGISTERS_START: u16 = 0x4000;
+const _APU_REGISTERS_LEN: usize = 0x20;
+// http://wiki.nesdev.com/w/index.php/2A03
 
 const _EXPANSION_ROM_START: u16 = 0x4020;
 const _EXPANSION_ROM_LEN: u16 = 0x1fdf;
