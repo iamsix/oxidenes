@@ -473,19 +473,22 @@ impl CPU {
             }
 
             AddressMode::x_indirect => {
-                let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
+                let tmp = self.bus.cart.read_cart_u8(self.program_counter);
                 self.program_counter += 1;
-                tmp = tmp.wrapping_add(self.index_x);
-                self.bus.ram[tmp as usize]
+                let value = self.bus.ram[tmp as usize];
+                value.wrapping_add(self.index_x)
             }
 
             AddressMode::indirect_y => {
-                let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
+                let tmp = self.bus.cart.read_cart_u8(self.program_counter) as u16;
                 self.program_counter += 1;
-                println!("Load ind,Y is {:#X} + {:#X}", tmp, self.index_y);
+                let result = tmp + self.index_y as u16;
+                println!("Load ind,Y is {:#X} + {:#X} = {:X}", tmp, self.index_y, result);
+                let lo = self.bus.ram[result as usize] as u16;
+                let hi = self.bus.ram[(result + 1) as usize] as u16;
+                let value:u16 = hi << 8 | lo;
                 panic!("carry not yet implemented here, it might fail if I continue");
-                tmp += self.index_y;
-                self.bus.ram[tmp as usize]
+                self.bus.ram[result as usize]
             }
         }
     }
