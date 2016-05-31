@@ -39,12 +39,14 @@ pub struct StatusReg {
     carry: bool,
 }
 
+#[derive(Debug)]
 enum RegType {
     A,
     X,
     Y,
 }
 
+#[derive(Debug)]
 enum AddressMode {
     absolute,
     absolute_x,
@@ -157,7 +159,7 @@ impl CPU {
             self.set_register(value, RegType::X);
         }
 
-       0xAE => { // LDX-absolute
+        0xAE => { // LDX-absolute
             let value = self.load_u8_from_memory(AddressMode::absolute);
             self.set_register(value, RegType::X);
         }
@@ -432,19 +434,9 @@ impl CPU {
                 self.bus.ram[tmp as usize]
             }
 
-            AddressMode::zeropage_x => {
-                let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
-                self.program_counter += 1;
-                tmp = tmp.wrapping_add(self.index_x);
-                self.bus.ram[tmp as usize]
-            }
+            AddressMode::zeropage_x => self.bus.ram[self.zeropage_xy(RegType::X)],
 
-            AddressMode::zeropage_y => {
-                let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
-                self.program_counter += 1;
-                tmp = tmp.wrapping_add(self.index_y);
-                self.bus.ram[tmp as usize]
-            }
+            AddressMode::zeropage_y => self.bus.ram[self.zeropage_xy(RegType::Y)],
 
             AddressMode::absolute => {
                 let tmp = self.bus.cart.read_cart_u16(self.program_counter);
@@ -452,45 +444,62 @@ impl CPU {
                 self.bus.ram[tmp as usize]
             }
 
-            AddressMode::absolute_x => {
-                let mut tmp = self.bus.cart.read_cart_u16(self.program_counter);
-                self.program_counter += 2;
-                println!("Load abs,X is {:#X} + {:#X}", tmp, self.index_x);
-                panic!("carry not yet implemented here, it might fail if I continue");
-                // TODO: implement carry
-                tmp += self.index_x as u16;
-                self.bus.ram[tmp as usize]
-            }
+            AddressMode::absolute_x => self.bus.ram[self.absolute_xy(RegType::X)],
 
-            AddressMode::absolute_y => {
-                let mut tmp = self.bus.cart.read_cart_u16(self.program_counter);
-                self.program_counter += 2;
-                println!("Load abs,Y is {:#X} + {:#X}", tmp, self.index_y);
-                panic!("carry not yet implemented here, it might fail if I continue");
-                // TODO: implement carry
-                tmp += self.index_y as u16;
-                self.bus.ram[tmp as usize]
-            }
+            AddressMode::absolute_y => self.bus.ram[self.absolute_xy(RegType::Y)],
 
-            AddressMode::x_indirect => {
-                let tmp = self.bus.cart.read_cart_u8(self.program_counter);
-                self.program_counter += 1;
-                let value = self.bus.ram[tmp as usize];
-                value.wrapping_add(self.index_x)
-            }
+            AddressMode::x_indirect => self.bus.ram[self.x_indirect()],
 
-            AddressMode::indirect_y => {
-                let tmp = self.bus.cart.read_cart_u8(self.program_counter) as u16;
-                self.program_counter += 1;
-                let result = tmp + self.index_y as u16;
-                println!("Load ind,Y is {:#X} + {:#X} = {:X}", tmp, self.index_y, result);
-                let lo = self.bus.ram[result as usize] as u16;
-                let hi = self.bus.ram[(result + 1) as usize] as u16;
-                let value:u16 = hi << 8 | lo;
-                panic!("carry not yet implemented here, it might fail if I continue");
-                self.bus.ram[result as usize]
-            }
+            AddressMode::indirect_y => self.bus.ram[self.indirect_y()],
+
         }
+    }
+
+    fn store_u8_in_memory(&mut self, addr_mode: AddressMode) {
+        // TODO
+    }
+
+    fn x_indirect(&mut self) -> usize {
+        let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        self.program_counter += 1;
+        let value = self.bus.ram[tmp as usize];
+        value.wrapping_add(self.index_x) as usize
+    }
+
+    fn zeropage_xy(&mut self, reg: RegType) -> usize {
+        let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        self.program_counter += 1;
+        match reg {
+            RegType::X => tmp.wrapping_add(self.index_x) as usize,
+            RegType::Y => tmp.wrapping_add(self.index_y) as usize,
+            _ => panic!("can not zpg,A")
+        }
+    }
+
+    fn absolute_xy(&mut self, reg: RegType) -> usize {
+        let mut tmp = self.bus.cart.read_cart_u16(self.program_counter);
+        self.program_counter += 2;
+        let result = match reg {
+            RegType::X => (tmp + self.index_x as u16) as usize,
+            RegType::Y => (tmp + self.index_y as u16) as usize,
+            _ => panic!("can not abs,A")
+        };
+        println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X}", reg, tmp,self.index_x, self.index_y);
+        panic!("carry not yet implemented here, it might fail if I continue");
+        // TODO: implement carry
+        result
+    }
+
+    fn indirect_y(&mut self) -> usize {
+        let tmp = self.bus.cart.read_cart_u8(self.program_counter) as u16;
+        self.program_counter += 1;
+        let result = tmp + self.index_y as u16;
+        println!("Load ind,Y is {:#X} + {:#X} = {:X}", tmp, self.index_y, result);
+        let lo = self.bus.ram[result as usize] as u16;
+        let hi = self.bus.ram[(result + 1) as usize] as u16;
+        let value:u16 = hi << 8 | lo;
+        panic!("carry not yet implemented here, it might fail if I continue");
+        result as usize
     }
 
     fn compare(&mut self, register:i16) {
