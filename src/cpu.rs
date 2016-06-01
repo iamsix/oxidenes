@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashSet;
+//use std::collections::HashSet;
 
 //pub HashMap: ops;
 
@@ -48,15 +48,15 @@ enum RegType {
 
 #[derive(Debug)]
 enum AddressMode {
-    absolute,
-    absolute_x,
-    absolute_y,
-    immediate,
-    x_indirect,
-    indirect_y,
-    zeropage,
-    zeropage_x,
-    zeropage_y
+    Absolute,
+    AbsoluteX,
+    AbsoluteY,
+    Immediate,
+    XIndirect,
+    IndirectY,
+    Zeropage,
+    ZeropageX,
+    ZeropageY,
 }
 //const ops-imm:[u8; 2] = [0x32, 0x24];
 // also do ops-abs, obs-impl, etc - to determine byte length
@@ -94,7 +94,7 @@ impl CPU {
         println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  SP:{:02X}",
                    self.program_counter, instr, self.accumulator, self.index_x, self.index_y,
                    tmp, self.stack_pointer); //, self.status_reg);
-//        if self.program_counter == 0xcf52 {break;}
+//        if self.program_counter == 0xd42e {break;}
         self.execute_op(instr as u8);
       }
     }
@@ -119,9 +119,23 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
+        0x46 => { // LSR - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            self.status_reg.carry = (value & (1 << 0)) != 0;
+            let value = value >> 1;
+            self.set_register(value, RegType::A);
+        }
+
         0x0A => { // ASL - A
             self.status_reg.carry = (self.accumulator & (1 << 7)) != 0;
             let value = ((self.accumulator as u16) << 1) as u8;
+            self.set_register(value, RegType::A);
+        }
+
+        0x06 => { // ASL - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            self.status_reg.carry = (value & (1 << 7)) != 0;
+            let value = ((value as u16) << 1) as u8;
             self.set_register(value, RegType::A);
         }
 
@@ -132,6 +146,14 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
+        0x66 => { // ROR - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let c = if self.status_reg.carry { 1 } else { 0 };
+            self.status_reg.carry = (value & (1 << 0)) != 0;
+            let value = (value >> 1) | c << 7;
+            self.set_register(value, RegType::A);
+        }
+
         0x2A => { // ROL - A
             let c = if self.status_reg.carry { 1 } else { 0 };
             self.status_reg.carry = (self.accumulator & (1 << 7)) != 0;
@@ -139,33 +161,61 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
+        0x26 => { // ROL - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let c = if self.status_reg.carry { 1 } else { 0 };
+            self.status_reg.carry = (value & (1 << 7)) != 0;
+            let value = (value << 1) | c << 0;
+            self.set_register(value, RegType::A);
+        }
+
         0xA9 => { // LDA - immediate
-            let value = self.load_u8_from_memory(AddressMode::immediate);
+            let value = self.load_u8_from_memory(AddressMode::Immediate);
             self.set_register(value, RegType::A);
         }
 
         0xA5 => { // LDA - zeropage
-            let value = self.load_u8_from_memory(AddressMode::zeropage);
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
             self.set_register(value, RegType::A);
         }
 
         0xAD => { // LDA - absolute
-            let value = self.load_u8_from_memory(AddressMode::absolute);
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
+            self.set_register(value, RegType::A);
+        }
+
+        0xA1 => { // LDA - indirect,x
+            let value = self.load_u8_from_memory(AddressMode::XIndirect);
             self.set_register(value, RegType::A);
         }
 
         0xA2 => { // LDX-immediate
-            let value = self.load_u8_from_memory(AddressMode::immediate);
+            let value = self.load_u8_from_memory(AddressMode::Immediate);
             self.set_register(value, RegType::X);
         }
 
         0xAE => { // LDX-absolute
-            let value = self.load_u8_from_memory(AddressMode::absolute);
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
             self.set_register(value, RegType::X);
         }
 
-        0xa0 => { // LDY-immediate
-            let value = self.load_u8_from_memory(AddressMode::immediate);
+        0xA6 => { // LDX-zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            self.set_register(value, RegType::X);
+        }
+
+        0xA0 => { // LDY-immediate
+            let value = self.load_u8_from_memory(AddressMode::Immediate);
+            self.set_register(value, RegType::Y);
+        }
+
+        0xA4 => { // LDY - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            self.set_register(value, RegType::Y);
+        }
+
+        0xAC => { // LDY - absolute
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
             self.set_register(value, RegType::Y);
         }
 
@@ -179,73 +229,108 @@ impl CPU {
         }
 
         0x09 => { // ORA - imm
-            let value = self.load_u8_from_memory(AddressMode::immediate);
+            let value = self.load_u8_from_memory(AddressMode::Immediate);
+            let result = self.accumulator | value;
+            self.set_register(result, RegType::A);
+        }
+
+        0x05 => { // ORA - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let result = self.accumulator | value;
+            self.set_register(result, RegType::A);
+        }
+
+        0x01 => { // ORA - XIndirect
+            let value = self.load_u8_from_memory(AddressMode::XIndirect);
             let result = self.accumulator | value;
             self.set_register(result, RegType::A);
         }
 
         0x49 => { // EOR - imm
-            let value = self.load_u8_from_memory(AddressMode::immediate);
+            let value = self.load_u8_from_memory(AddressMode::Immediate);
             let result = self.accumulator ^ value;
             self.set_register(result, RegType::A);
         }
 
-        0x69 => { // ADC - imm
-            let value = self.load_u8_from_memory(AddressMode::immediate) as u16;
-            let a = self.accumulator as u16;
-            let c = if self.status_reg.carry { 1 } else { 0 };
-
-            let result = a + value + c;
-            println!("ADC: A{:#X} + M{:#X} + C{:#X} = {:X}", a, value, c, result);
-            self.status_reg.carry = result > 0xff;
-            self.status_reg.overflow = !(value & (1 << 7) != 0 ||
-                                         self.status_reg.negative_sign) &&
-                                         result >= 0x80;
-            self.set_register(result as u8, RegType::A);
+        0x45 => { // EOR - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let result = self.accumulator ^ value;
+            self.set_register(result, RegType::A);
         }
 
-        0xE9 => { // SBC - imm
-            let value = self.load_u8_from_memory(AddressMode::immediate) as i16;
-            let a = self.accumulator as i16;
-            let c = if self.status_reg.carry { 0 } else { 1 };
-
-            let result = a - value - c;
-            println!("SBC: A{:#X} - M{:#X} - C{:#X} = {:#?}", a, value, c, result);
-            self.status_reg.carry = result >= 0;
-            self.status_reg.overflow = (value & (1 << 7) != 0 ||
-                                         self.status_reg.negative_sign) &&
-                                         (result as u8) < 0x80;
-            self.set_register(result as u8, RegType::A);
+        0x41 => { // EOR - x,ind
+            let value = self.load_u8_from_memory(AddressMode::XIndirect);
+            let result = self.accumulator ^ value;
+            self.set_register(result, RegType::A);
         }
+
+        // ADC - imm
+        0x69 => self.add_with_carry(AddressMode::Immediate),
+
+        // ADC - zpg
+        0x65 => self.add_with_carry(AddressMode::Zeropage),
+
+        // ADC - ind,x
+        0x61 => self.add_with_carry(AddressMode::XIndirect),
+
+        // SBC - imm
+        0xE9 => self.sub_with_carry(AddressMode::Immediate),
+
+        // SBC - zpg
+        0xE5 => self.sub_with_carry(AddressMode::Zeropage),
+
+        // SBC - ind,x
+        0xE1 => self.sub_with_carry(AddressMode::XIndirect),
 
         0x86 => { // STX-zeropage
-            let value = self.load_u8_from_memory(AddressMode::immediate);
-            self.bus.ram[value as usize] = self.index_x;
+            let tmp = self.index_x;
+            self.store_u8_in_memory(tmp, AddressMode::Zeropage);
         }
 
         0x8E => { // STX-absolute
-            let value = self.bus.cart.read_cart_u16(self.program_counter);
-            self.program_counter +=2;
-            self.bus.ram[value as usize] = self.index_x;
+            let tmp = self.index_x;
+            self.store_u8_in_memory(tmp, AddressMode::Absolute);
         }
 
         0x85 => { // STA-zeropage
-            let value = self.load_u8_from_memory(AddressMode::immediate);
-            // TODO: Make write_u8 function to better map the CPU memory
-            self.bus.ram[value as usize] = self.accumulator;
+            let tmp = self.accumulator;
+            self.store_u8_in_memory(tmp, AddressMode::Zeropage);
+        }
+
+        0x8D => { // STA-absolue
+            let tmp = self.accumulator;
+            self.store_u8_in_memory(tmp, AddressMode::Absolute);
+        }
+
+        0x81 => { // STA-ind,x
+            let tmp = self.accumulator;
+            self.store_u8_in_memory(tmp, AddressMode::XIndirect);
+        }
+
+        0x84 => { //STY - zeropage
+            let tmp = self.index_y;
+            self.store_u8_in_memory(tmp, AddressMode::Zeropage);
+        }
+
+        //STY - absolute
+        0x8C => {
+            let tmp = self.index_y;
+            self.store_u8_in_memory(tmp, AddressMode::Absolute);
         }
 
         0x20 => { // JSR-Absolute
             let value = self.bus.cart.read_cart_u16(self.program_counter);
             self.program_counter += 1;
+
             let hi = (self.program_counter >> 8) as u8;
             self.push_stack(hi);
             let lo = (0x00ff & self.program_counter) as u8;
             self.push_stack(lo);
+
             self.program_counter = value;
         }
 
-                  // NOP // TODO: 2 cycles
+        // NOP // TODO: 2 cycles
         0xEA => {println!("NOP");}
 
         0xA8 => { //TAY - impl
@@ -283,18 +368,25 @@ impl CPU {
             self.set_register(tmp, RegType::X)
         }
 
-        0xBA => { // TSX -impl
-            let tmp = self.stack_pointer;
-            self.set_register(tmp, RegType::X)
-        }
+        // INC - zeropage
+        0xE6 => self.increment_memory(AddressMode::Zeropage),
 
-                  // TXS -impl
-        0x9A => self.stack_pointer = self.index_x,
+        // DEC - zeropage
+        0xC6 => self.decrement_memory(AddressMode::Zeropage),
 
         0xCA => { //DEX - impl
             let tmp = self.index_x.wrapping_sub(1);
             self.set_register(tmp, RegType::X)
         }
+
+        0xBA => { // TSX -impl
+            let tmp = self.stack_pointer;
+            self.set_register(tmp, RegType::X)
+        }
+
+        // TXS -impl
+        0x9A => self.stack_pointer = self.index_x,
+
 
         0x50 => { // BVC - relative - 2 bytes
             let tmp = !self.status_reg.overflow;
@@ -337,7 +429,16 @@ impl CPU {
         }
 
         0x24 => { // BIT - zeropage
-            let value = self.load_u8_from_memory(AddressMode::zeropage);
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let result = self.accumulator & value;
+            println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
+            self.status_reg.zero = result == 0;
+            self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+            self.status_reg.overflow = (value & (1 << 6)) != 0;
+        }
+
+        0x2C => { // BIT - zeropage
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
             let result = self.accumulator & value;
             println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
             self.status_reg.zero = result == 0;
@@ -352,25 +453,25 @@ impl CPU {
             self.program_counter = value + 1;
         }
 
-                  // SEI - impl
+        // SEI - impl
         0x78 => self.status_reg.interrupt_disable = true,
 
-                  // CLI - impl
+        // CLI - impl
         0x58 => self.status_reg.interrupt_disable = false,
 
-                  // SED - impl
+        // SED - impl
         0xF8 => self.status_reg.decimal_mode = true,
 
-                  // CLD - impl
+        // CLD - impl
         0xD8 =>  self.status_reg.decimal_mode = false,
 
-                  // SEC - implied
+        // SEC - implied
         0x38 => self.status_reg.carry = true,
 
-                  // CLC - implied
+        // CLC - implied
         0x18 => self.status_reg.carry = false,
 
-                  // CLV - impl
+        // CLV - impl
         0xB8 => self.status_reg.overflow = false,
 
         0x08 => { // PHP - impl
@@ -391,83 +492,200 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
-        0x48 => { // PHA - impl
+        // PHA - impl
+        0x48 => {
             let tmp = self.accumulator;
             self.push_stack(tmp);
         }
 
-        0x29 => {  // AND - immediate
-            let value = self.load_u8_from_memory(AddressMode::immediate);
+        // AND - immediate
+        0x29 => {
+            let value = self.load_u8_from_memory(AddressMode::Immediate);
             let result = self.accumulator & value;
             self.set_register(result, RegType::A);
         }
 
-        0xC9 => { // CMP - immediate
-            let a = self.accumulator as i16;
-            self.compare(a);
+        // AND - zeropage
+        0x25 => {
+            let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let result = self.accumulator & value;
+            self.set_register(result, RegType::A);
         }
 
-        0xC0 => { // CPY - immediate
-            let y = self.index_y as i16;
-            self.compare(y);
+        // AND - xindirect
+        0x21 => {
+            let value = self.load_u8_from_memory(AddressMode::XIndirect);
+            let result = self.accumulator & value;
+            self.set_register(result, RegType::A);
         }
 
-        0xE0 => { // CPY - immediate
-            let x = self.index_x as i16;
-            self.compare(x);
-        }
+        // CMP - immediate
+        0xC9 => self.compare(RegType::A, AddressMode::Immediate),
+
+        // CMP - immediate
+        0xC5 => self.compare(RegType::A, AddressMode::Zeropage),
+
+        // CMP - x,ind
+        0xC1 => self.compare(RegType::A, AddressMode::XIndirect),
+
+        // CPY - immediate
+        0xC0 => self.compare(RegType::Y, AddressMode::Immediate),
+
+        // CPY - immediate
+        0xC4 => self.compare(RegType::Y, AddressMode::Zeropage),
+
+        // CPX - immediate
+        0xE0 => self.compare(RegType::X, AddressMode::Immediate),
+
+        // CPX - zpg
+        0xE4 => self.compare(RegType::X, AddressMode::Zeropage),
 
         _ => panic!("The opcode: {:#x} is unrecognized", instr)
       }
     }
 
+    fn add_with_carry(&mut self, addr_mode: AddressMode) {
+        let value = self.load_u8_from_memory(addr_mode) as u16;
+        let a = self.accumulator as u16;
+        let c = if self.status_reg.carry { 1 } else { 0 };
+
+        let result = a + value + c;
+        println!("ADC: A{:#X} + M{:#X} + C{:#X} = {:X}", a, value, c, result);
+        self.status_reg.carry = result > 0xff;
+        self.status_reg.overflow = !(value & (1 << 7) != 0 ||
+                                     self.status_reg.negative_sign) &&
+                                     result >= 0x80;
+        self.set_register(result as u8, RegType::A);
+    }
+
+    fn sub_with_carry(&mut self, addr_mode: AddressMode) {
+        let value = self.load_u8_from_memory(addr_mode) as i16;
+        let a = self.accumulator as i16;
+        let c = if self.status_reg.carry { 0 } else { 1 };
+
+        let result = a - value - c;
+        println!("SBC: A{:#X} - M{:#X} - C{:#X} = {:#?}", a, value, c, result);
+        self.status_reg.carry = result >= 0;
+        self.status_reg.overflow = (value & (1 << 7) != 0 ||
+                                     self.status_reg.negative_sign) &&
+                                     (result as u8) < 0x80;
+        self.set_register(result as u8, RegType::A);
+    }
+
+    fn increment_memory(&mut self, addr_mode: AddressMode) {
+        let addr = self.memory_lookup(addr_mode);
+        let mut value = self.bus.ram[addr];
+        value = value.wrapping_add(1);
+        self.status_reg.zero = value == 0;
+        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+        self.bus.ram[addr] = value;
+    }
+
+    fn decrement_memory(&mut self, addr_mode: AddressMode) {
+        let addr = self.memory_lookup(addr_mode);
+        let mut value = self.bus.ram[addr];
+        value = value.wrapping_sub(1);
+        self.status_reg.zero = value == 0;
+        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+        self.bus.ram[addr] = value;
+    }
+
+    fn memory_lookup(&mut self, addr_mode: AddressMode) -> usize {
+        match addr_mode {
+            AddressMode::Zeropage => {
+                let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+                self.program_counter += 1;
+                tmp as usize
+            }
+
+            AddressMode::ZeropageX => self.zeropage_xy(RegType::X),
+            AddressMode::Absolute => {
+                let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+                self.program_counter += 2;
+                tmp as usize
+            }
+            AddressMode::AbsoluteX => self.absolute_xy(RegType::X),
+
+            _ => panic!("address_lookup doesn't work on {:?}", addr_mode)
+        }
+    }
+
     fn load_u8_from_memory(&mut self, addr_mode: AddressMode) -> u8 {
         match addr_mode {
-            AddressMode::immediate => {
+            AddressMode::Immediate => {
                 self.program_counter += 1;
                 self.bus.cart.read_cart_u8(self.program_counter - 1)
             }
 
-            AddressMode::zeropage => {
+            AddressMode::Zeropage => {
                 let tmp = self.bus.cart.read_cart_u8(self.program_counter);
                 self.program_counter += 1;
                 self.bus.ram[tmp as usize]
             }
 
-            AddressMode::zeropage_x => self.bus.ram[self.zeropage_xy(RegType::X)],
+            AddressMode::ZeropageX => self.bus.ram[self.zeropage_xy(RegType::X)],
 
-            AddressMode::zeropage_y => self.bus.ram[self.zeropage_xy(RegType::Y)],
+            AddressMode::ZeropageY => self.bus.ram[self.zeropage_xy(RegType::Y)],
 
-            AddressMode::absolute => {
+            AddressMode::Absolute => {
                 let tmp = self.bus.cart.read_cart_u16(self.program_counter);
                 self.program_counter += 2;
                 self.bus.ram[tmp as usize]
             }
 
-            AddressMode::absolute_x => self.bus.ram[self.absolute_xy(RegType::X)],
+            AddressMode::AbsoluteX => self.bus.ram[self.absolute_xy(RegType::X)],
 
-            AddressMode::absolute_y => self.bus.ram[self.absolute_xy(RegType::Y)],
+            AddressMode::AbsoluteY => self.bus.ram[self.absolute_xy(RegType::Y)],
 
-            AddressMode::x_indirect => self.bus.ram[self.x_indirect()],
+            AddressMode::XIndirect => self.bus.ram[self.x_indirect()],
 
-            AddressMode::indirect_y => self.bus.ram[self.indirect_y()],
+            AddressMode::IndirectY => self.bus.ram[self.indirect_y()],
 
         }
     }
 
-    fn store_u8_in_memory(&mut self, addr_mode: AddressMode) {
-        // TODO
+    fn store_u8_in_memory(&mut self, value: u8, addr_mode: AddressMode) {
+        match addr_mode {
+            AddressMode::Zeropage => {
+                let tmp = self.bus.cart.read_cart_u8(self.program_counter) as usize;
+                self.program_counter += 1;
+                self.bus.ram[tmp] = value;
+            }
+
+            AddressMode::ZeropageX => self.bus.ram[self.zeropage_xy(RegType::X)] = value,
+
+            AddressMode::ZeropageY => self.bus.ram[self.zeropage_xy(RegType::Y)] = value,
+
+            AddressMode::Absolute => {
+                let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+                self.program_counter += 2;
+                self.bus.ram[tmp as usize] = value;
+            }
+
+            AddressMode::AbsoluteX => self.bus.ram[self.absolute_xy(RegType::X)] = value,
+
+            AddressMode::AbsoluteY => self.bus.ram[self.absolute_xy(RegType::Y)] = value,
+
+            AddressMode::XIndirect => self.bus.ram[self.x_indirect()] = value,
+
+            AddressMode::IndirectY => self.bus.ram[self.indirect_y()] = value,
+
+            _ => panic!("It's not possible to write with {:?}", addr_mode),
+
+        }
     }
 
     fn x_indirect(&mut self) -> usize {
-        let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
         self.program_counter += 1;
-        let value = self.bus.ram[tmp as usize];
-        value.wrapping_add(self.index_x) as usize
+        tmp = tmp.wrapping_add(self.index_x);
+        let lo = self.bus.ram[tmp as usize] as usize;
+        let hi = self.bus.ram[(tmp.wrapping_add(1)) as usize] as usize;
+        hi << 8 | lo
     }
 
     fn zeropage_xy(&mut self, reg: RegType) -> usize {
-        let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        let tmp = self.bus.cart.read_cart_u8(self.program_counter);
         self.program_counter += 1;
         match reg {
             RegType::X => tmp.wrapping_add(self.index_x) as usize,
@@ -477,7 +695,7 @@ impl CPU {
     }
 
     fn absolute_xy(&mut self, reg: RegType) -> usize {
-        let mut tmp = self.bus.cart.read_cart_u16(self.program_counter);
+        let tmp = self.bus.cart.read_cart_u16(self.program_counter);
         self.program_counter += 2;
         let result = match reg {
             RegType::X => (tmp + self.index_x as u16) as usize,
@@ -499,11 +717,16 @@ impl CPU {
         let hi = self.bus.ram[(result + 1) as usize] as u16;
         let value:u16 = hi << 8 | lo;
         panic!("carry not yet implemented here, it might fail if I continue");
-        result as usize
+        value as usize
     }
 
-    fn compare(&mut self, register:i16) {
-        let value = self.load_u8_from_memory(AddressMode::immediate) as i16;
+    fn compare(&mut self, reg:RegType, addr_mode:AddressMode) {
+        let register = match reg {
+            RegType::A => self.accumulator as i16,
+            RegType::Y => self.index_y as i16,
+            RegType::X => self.index_x as i16,
+        };
+        let value = self.load_u8_from_memory(addr_mode) as i16;
         println!("CMY {:#X} - {:#X}", register, value);
         let result = (register - value) as u8;
         self.status_reg.zero = register == value;
@@ -516,7 +739,7 @@ impl CPU {
     // maybe should be wrapping
     fn branch(&mut self, condition: bool) {
         if condition {
-            let value = self.load_u8_from_memory(AddressMode::immediate) as i8;
+            let value = self.load_u8_from_memory(AddressMode::Immediate) as i8;
             println!("{:}", value);
             if value >= 0 {
                 self.program_counter += value as u16;
