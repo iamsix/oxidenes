@@ -94,7 +94,7 @@ impl CPU {
         println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  SP:{:02X}",
                    self.program_counter, instr, self.accumulator, self.index_x, self.index_y,
                    tmp, self.stack_pointer); //, self.status_reg);
-//        if self.program_counter == 0xd42e {break;}
+ //       if self.program_counter == 0xd942 {break;}
         self.execute_op(instr as u8);
       }
     }
@@ -126,6 +126,13 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
+        0x4E => { // LSR - absolute
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
+            self.status_reg.carry = (value & (1 << 0)) != 0;
+            let value = value >> 1;
+            self.set_register(value, RegType::A);
+        }
+
         0x0A => { // ASL - A
             self.status_reg.carry = (self.accumulator & (1 << 7)) != 0;
             let value = ((self.accumulator as u16) << 1) as u8;
@@ -134,6 +141,13 @@ impl CPU {
 
         0x06 => { // ASL - zeropage
             let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            self.status_reg.carry = (value & (1 << 7)) != 0;
+            let value = ((value as u16) << 1) as u8;
+            self.set_register(value, RegType::A);
+        }
+
+        0x0E => { // ASL - absolute
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
             self.status_reg.carry = (value & (1 << 7)) != 0;
             let value = ((value as u16) << 1) as u8;
             self.set_register(value, RegType::A);
@@ -154,6 +168,14 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
+        0x6E => { // ROR - absolute
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
+            let c = if self.status_reg.carry { 1 } else { 0 };
+            self.status_reg.carry = (value & (1 << 0)) != 0;
+            let value = (value >> 1) | c << 7;
+            self.set_register(value, RegType::A);
+        }
+
         0x2A => { // ROL - A
             let c = if self.status_reg.carry { 1 } else { 0 };
             self.status_reg.carry = (self.accumulator & (1 << 7)) != 0;
@@ -163,6 +185,14 @@ impl CPU {
 
         0x26 => { // ROL - zeropage
             let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            let c = if self.status_reg.carry { 1 } else { 0 };
+            self.status_reg.carry = (value & (1 << 7)) != 0;
+            let value = (value << 1) | c << 0;
+            self.set_register(value, RegType::A);
+        }
+
+        0x2E => { // ROL - abs
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
             let c = if self.status_reg.carry { 1 } else { 0 };
             self.status_reg.carry = (value & (1 << 7)) != 0;
             let value = (value << 1) | c << 0;
@@ -186,6 +216,11 @@ impl CPU {
 
         0xA1 => { // LDA - indirect,x
             let value = self.load_u8_from_memory(AddressMode::XIndirect);
+            self.set_register(value, RegType::A);
+        }
+
+        0xB1 => { // LDA - indirect,Y
+            let value = self.load_u8_from_memory(AddressMode::IndirectY);
             self.set_register(value, RegType::A);
         }
 
@@ -246,6 +281,12 @@ impl CPU {
             self.set_register(result, RegType::A);
         }
 
+        0x0D => { // ORA - Absolute
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
+            let result = self.accumulator | value;
+            self.set_register(result, RegType::A);
+        }
+
         0x49 => { // EOR - imm
             let value = self.load_u8_from_memory(AddressMode::Immediate);
             let result = self.accumulator ^ value;
@@ -264,6 +305,12 @@ impl CPU {
             self.set_register(result, RegType::A);
         }
 
+        0x4D => { // EOR - abs
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
+            let result = self.accumulator ^ value;
+            self.set_register(result, RegType::A);
+        }
+
         // ADC - imm
         0x69 => self.add_with_carry(AddressMode::Immediate),
 
@@ -273,6 +320,9 @@ impl CPU {
         // ADC - ind,x
         0x61 => self.add_with_carry(AddressMode::XIndirect),
 
+        // ADC - abs
+        0x6D => self.add_with_carry(AddressMode::Absolute),
+
         // SBC - imm
         0xE9 => self.sub_with_carry(AddressMode::Immediate),
 
@@ -281,6 +331,9 @@ impl CPU {
 
         // SBC - ind,x
         0xE1 => self.sub_with_carry(AddressMode::XIndirect),
+
+        // SBC - ind,x
+        0xED => self.sub_with_carry(AddressMode::Absolute),
 
         0x86 => { // STX-zeropage
             let tmp = self.index_x;
@@ -371,8 +424,14 @@ impl CPU {
         // INC - zeropage
         0xE6 => self.increment_memory(AddressMode::Zeropage),
 
+        // INC - absolute
+        0xEE => self.increment_memory(AddressMode::Absolute),
+
         // DEC - zeropage
         0xC6 => self.decrement_memory(AddressMode::Zeropage),
+
+        // DEC - absolute
+        0xCE => self.decrement_memory(AddressMode::Absolute),
 
         0xCA => { //DEX - impl
             let tmp = self.index_x.wrapping_sub(1);
@@ -519,6 +578,13 @@ impl CPU {
             self.set_register(result, RegType::A);
         }
 
+        // AND absolute
+        0x2D => {
+            let value = self.load_u8_from_memory(AddressMode::Absolute);
+            let result = self.accumulator & value;
+            self.set_register(result, RegType::A);
+        }
+
         // CMP - immediate
         0xC9 => self.compare(RegType::A, AddressMode::Immediate),
 
@@ -528,17 +594,26 @@ impl CPU {
         // CMP - x,ind
         0xC1 => self.compare(RegType::A, AddressMode::XIndirect),
 
+        // CMP - abs
+        0xCD => self.compare(RegType::A, AddressMode::Absolute),
+
         // CPY - immediate
         0xC0 => self.compare(RegType::Y, AddressMode::Immediate),
 
-        // CPY - immediate
+        // CPY - zpg
         0xC4 => self.compare(RegType::Y, AddressMode::Zeropage),
+
+        // CPY - abs
+        0xCC => self.compare(RegType::Y, AddressMode::Absolute),
 
         // CPX - immediate
         0xE0 => self.compare(RegType::X, AddressMode::Immediate),
 
         // CPX - zpg
         0xE4 => self.compare(RegType::X, AddressMode::Zeropage),
+
+        // CPX - abs
+        0xEC => self.compare(RegType::X, AddressMode::Absolute),
 
         _ => panic!("The opcode: {:#x} is unrecognized", instr)
       }
@@ -694,6 +769,7 @@ impl CPU {
         }
     }
 
+    // wrapping add?
     fn absolute_xy(&mut self, reg: RegType) -> usize {
         let tmp = self.bus.cart.read_cart_u16(self.program_counter);
         self.program_counter += 2;
@@ -709,15 +785,15 @@ impl CPU {
     }
 
     fn indirect_y(&mut self) -> usize {
-        let tmp = self.bus.cart.read_cart_u8(self.program_counter) as u16;
+        let tmp = self.bus.cart.read_cart_u8(self.program_counter);
         self.program_counter += 1;
-        let result = tmp + self.index_y as u16;
-        println!("Load ind,Y is {:#X} + {:#X} = {:X}", tmp, self.index_y, result);
-        let lo = self.bus.ram[result as usize] as u16;
-        let hi = self.bus.ram[(result + 1) as usize] as u16;
-        let value:u16 = hi << 8 | lo;
-        panic!("carry not yet implemented here, it might fail if I continue");
-        value as usize
+        let lo = self.bus.ram[tmp as usize] as u32;
+        let hi = self.bus.ram[tmp.wrapping_add(1) as usize] as u32;
+        let value:u32 = hi << 8 | lo;
+        let result = value + self.index_y as u32;
+        self.status_reg.carry = result > 0xFFFF;
+        println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
+        result as u16 as usize
     }
 
     fn compare(&mut self, reg:RegType, addr_mode:AddressMode) {
