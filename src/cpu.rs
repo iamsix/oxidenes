@@ -48,6 +48,7 @@ enum RegType {
 
 #[derive(Debug)]
 enum AddressMode {
+    Accumulator,
     Absolute,
     AbsoluteX,
     AbsoluteY,
@@ -113,91 +114,41 @@ impl CPU {
             self.program_counter = value;
         }
 
-        0x4A => { // LSR - A
-            self.status_reg.carry = (self.accumulator & (1 << 0)) != 0;
-            let value = self.accumulator >> 1;
-            self.set_register(value, RegType::A);
-        }
+        // LSR - A
+        0x4A => self.shift_right_to_A(AddressMode::Accumulator),
 
-        0x46 => { // LSR - zeropage
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            self.status_reg.carry = (value & (1 << 0)) != 0;
-            let value = value >> 1;
-            self.set_register(value, RegType::A);
-        }
+        // LSR - zeropage
+        0x46 => self.shift_right_to_A(AddressMode::Zeropage),
 
-        0x4E => { // LSR - absolute
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            self.status_reg.carry = (value & (1 << 0)) != 0;
-            let value = value >> 1;
-            self.set_register(value, RegType::A);
-        }
+        // LSR - abs
+        0x4E => self.shift_right_to_A(AddressMode::Absolute),
 
-        0x0A => { // ASL - A
-            self.status_reg.carry = (self.accumulator & (1 << 7)) != 0;
-            let value = ((self.accumulator as u16) << 1) as u8;
-            self.set_register(value, RegType::A);
-        }
+        // ASL - A
+        0x0A => self.shift_left_to_A(AddressMode::Accumulator),
 
-        0x06 => { // ASL - zeropage
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            self.status_reg.carry = (value & (1 << 7)) != 0;
-            let value = ((value as u16) << 1) as u8;
-            self.set_register(value, RegType::A);
-        }
+        // ASL - zpg
+        0x06 => self.shift_left_to_A(AddressMode::Zeropage),
 
-        0x0E => { // ASL - absolute
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            self.status_reg.carry = (value & (1 << 7)) != 0;
-            let value = ((value as u16) << 1) as u8;
-            self.set_register(value, RegType::A);
-        }
+        // ASL - abs
+        0x0E => self.shift_left_to_A(AddressMode::Absolute),
 
-        0x6A => { // ROR - A
-            let c = if self.status_reg.carry { 1 } else { 0 };
-            self.status_reg.carry = (self.accumulator & (1 << 0)) != 0;
-            let value = (self.accumulator >> 1) | c << 7;
-            self.set_register(value, RegType::A);
-        }
+        // ROR - A
+        0x6A => self.rotate_right_to_A(AddressMode::Accumulator),
 
-        0x66 => { // ROR - zeropage
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            let c = if self.status_reg.carry { 1 } else { 0 };
-            self.status_reg.carry = (value & (1 << 0)) != 0;
-            let value = (value >> 1) | c << 7;
-            self.set_register(value, RegType::A);
-        }
+        // ROR - zpg
+        0x66 => self.rotate_right_to_A(AddressMode::Zeropage),
 
-        0x6E => { // ROR - absolute
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            let c = if self.status_reg.carry { 1 } else { 0 };
-            self.status_reg.carry = (value & (1 << 0)) != 0;
-            let value = (value >> 1) | c << 7;
-            self.set_register(value, RegType::A);
-        }
+        // ROR - abs
+        0x6E => self.rotate_right_to_A(AddressMode::Absolute),
 
-        0x2A => { // ROL - A
-            let c = if self.status_reg.carry { 1 } else { 0 };
-            self.status_reg.carry = (self.accumulator & (1 << 7)) != 0;
-            let value = (self.accumulator << 1) | c << 0;
-            self.set_register(value, RegType::A);
-        }
+        // ROL - A
+        0x2A => self.rotate_left_to_A(AddressMode::Accumulator),
 
-        0x26 => { // ROL - zeropage
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            let c = if self.status_reg.carry { 1 } else { 0 };
-            self.status_reg.carry = (value & (1 << 7)) != 0;
-            let value = (value << 1) | c << 0;
-            self.set_register(value, RegType::A);
-        }
+        // ROL - zpg
+        0x26 => self.rotate_left_to_A(AddressMode::Zeropage),
 
-        0x2E => { // ROL - abs
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            let c = if self.status_reg.carry { 1 } else { 0 };
-            self.status_reg.carry = (value & (1 << 7)) != 0;
-            let value = (value << 1) | c << 0;
-            self.set_register(value, RegType::A);
-        }
+        // ROL - abs
+        0x2E => self.rotate_left_to_A(AddressMode::Absolute),
 
         0xA9 => { // LDA - immediate
             let value = self.load_u8_from_memory(AddressMode::Immediate);
@@ -263,53 +214,29 @@ impl CPU {
             self.program_counter = value;
         }
 
-        0x09 => { // ORA - imm
-            let value = self.load_u8_from_memory(AddressMode::Immediate);
-            let result = self.accumulator | value;
-            self.set_register(result, RegType::A);
-        }
+        // ORA - imm
+        0x09 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Immediate),
 
-        0x05 => { // ORA - zeropage
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            let result = self.accumulator | value;
-            self.set_register(result, RegType::A);
-        }
+        // ORA - zpg
+        0x05 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Zeropage),
 
-        0x01 => { // ORA - XIndirect
-            let value = self.load_u8_from_memory(AddressMode::XIndirect);
-            let result = self.accumulator | value;
-            self.set_register(result, RegType::A);
-        }
+        // ORA - ind,x
+        0x01 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::XIndirect),
 
-        0x0D => { // ORA - Absolute
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            let result = self.accumulator | value;
-            self.set_register(result, RegType::A);
-        }
+        // ORA - abs
+        0x0D => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Absolute),
 
-        0x49 => { // EOR - imm
-            let value = self.load_u8_from_memory(AddressMode::Immediate);
-            let result = self.accumulator ^ value;
-            self.set_register(result, RegType::A);
-        }
+        // EOR - imm
+        0x49 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Immediate),
 
-        0x45 => { // EOR - zeropage
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            let result = self.accumulator ^ value;
-            self.set_register(result, RegType::A);
-        }
+        // EOR - zpg
+        0x45 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Zeropage),
 
-        0x41 => { // EOR - x,ind
-            let value = self.load_u8_from_memory(AddressMode::XIndirect);
-            let result = self.accumulator ^ value;
-            self.set_register(result, RegType::A);
-        }
+        // EOR - ind,x
+        0x41 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::XIndirect),
 
-        0x4D => { // EOR - abs
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            let result = self.accumulator ^ value;
-            self.set_register(result, RegType::A);
-        }
+        // EOR - abs
+        0x4D => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Absolute),
 
         // ADC - imm
         0x69 => self.add_with_carry(AddressMode::Immediate),
@@ -496,7 +423,7 @@ impl CPU {
             self.status_reg.overflow = (value & (1 << 6)) != 0;
         }
 
-        0x2C => { // BIT - zeropage
+        0x2C => { // BIT - absolute
             let value = self.load_u8_from_memory(AddressMode::Absolute);
             let result = self.accumulator & value;
             println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
@@ -558,32 +485,16 @@ impl CPU {
         }
 
         // AND - immediate
-        0x29 => {
-            let value = self.load_u8_from_memory(AddressMode::Immediate);
-            let result = self.accumulator & value;
-            self.set_register(result, RegType::A);
-        }
+        0x29 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Immediate),
 
         // AND - zeropage
-        0x25 => {
-            let value = self.load_u8_from_memory(AddressMode::Zeropage);
-            let result = self.accumulator & value;
-            self.set_register(result, RegType::A);
-        }
+        0x25 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Zeropage),
 
         // AND - xindirect
-        0x21 => {
-            let value = self.load_u8_from_memory(AddressMode::XIndirect);
-            let result = self.accumulator & value;
-            self.set_register(result, RegType::A);
-        }
+        0x21 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::XIndirect),
 
         // AND absolute
-        0x2D => {
-            let value = self.load_u8_from_memory(AddressMode::Absolute);
-            let result = self.accumulator & value;
-            self.set_register(result, RegType::A);
-        }
+        0x2D => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Absolute),
 
         // CMP - immediate
         0xC9 => self.compare(RegType::A, AddressMode::Immediate),
@@ -617,6 +528,45 @@ impl CPU {
 
         _ => panic!("The opcode: {:#x} is unrecognized", instr)
       }
+    }
+
+    fn rotate_right_to_A(&mut self, addr_mode: AddressMode) {
+        let value = self.load_u8_from_memory(addr_mode);
+        let c = if self.status_reg.carry { 1 } else { 0 };
+        self.status_reg.carry = (value & (1 << 0)) != 0;
+        let value = (value >> 1) | c << 7;
+        self.set_register(value, RegType::A);
+    }
+
+    fn rotate_left_to_A(&mut self, addr_mode: AddressMode) {
+        let value = self.load_u8_from_memory(addr_mode);
+        let c = if self.status_reg.carry { 1 } else { 0 };
+        self.status_reg.carry = (value & (1 << 7)) != 0;
+        let value = (value << 1) | c << 0;
+        self.set_register(value, RegType::A);
+    }
+
+    fn shift_right_to_A(&mut self, addr_mode: AddressMode) {
+        let value = self.load_u8_from_memory(addr_mode);
+        self.status_reg.carry = (value & (1 << 0)) != 0;
+        let value = value >> 1;
+        self.set_register(value, RegType::A);
+    }
+
+    fn shift_left_to_A(&mut self, addr_mode: AddressMode) { // ASL - zeropage
+        let value = self.load_u8_from_memory(addr_mode);
+        self.status_reg.carry = (value & (1 << 7)) != 0;
+        let value = ((value as u16) << 1) as u8;
+        self.set_register(value, RegType::A);
+    }
+
+    fn bitwise_op_to_A<F>(&mut self, f: F, addr_mode: AddressMode)
+                          where F: FnOnce(u8, u8) -> u8 {
+
+        let m = self.load_u8_from_memory(addr_mode);
+        let a = self.accumulator;
+        let value = f(a, m);
+        self.set_register(value, RegType::A);
     }
 
     fn add_with_carry(&mut self, addr_mode: AddressMode) {
@@ -687,6 +637,7 @@ impl CPU {
 
     fn load_u8_from_memory(&mut self, addr_mode: AddressMode) -> u8 {
         match addr_mode {
+            AddressMode::Accumulator => self.accumulator,
             AddressMode::Immediate => {
                 self.program_counter += 1;
                 self.bus.cart.read_cart_u8(self.program_counter - 1)
