@@ -95,7 +95,7 @@ impl CPU {
         println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  SP:{:02X}",
                    self.program_counter, instr, self.accumulator, self.index_x, self.index_y,
                    tmp, self.stack_pointer); //, self.status_reg);
- //       if self.program_counter == 0xd942 {break;}
+        //if self.program_counter == 0xda5e {break;}
         self.execute_op(instr as u8);
       }
     }
@@ -112,6 +112,20 @@ impl CPU {
         0x4C => { // JMP-absolute
             let value = self.bus.cart.read_cart_u16(self.program_counter);
             self.program_counter = value;
+        }
+
+        0x6C => { // JMP-indirect
+            let lotmp = self.bus.cart.read_cart_u8(self.program_counter);
+            let hitmp = self.bus.cart.read_cart_u8(self.program_counter +1);
+            // because there is no carry the lo byte of effective addr wraps +1
+            // see http://www.6502.org/tutorials/6502opcodes.html under JMP
+
+            let mut tmp = ((hitmp as u16) << 8 | lotmp as u16) as usize;
+            let lo = self.bus.ram[tmp] as u16;
+            tmp = ((hitmp as u16) << 8 | lotmp.wrapping_add(1) as u16) as usize;
+            let hi = self.bus.ram[tmp] as u16;
+            println!("ind: {:#X} JMP ${:X}${:X}", tmp, hi, lo);
+            self.program_counter = hi << 8 | lo;
         }
 
         // LSR - A
@@ -223,6 +237,9 @@ impl CPU {
         // ORA - ind,x
         0x01 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::XIndirect),
 
+        // ORA - ind,y
+        0x11 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::IndirectY),
+
         // ORA - abs
         0x0D => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Absolute),
 
@@ -234,6 +251,9 @@ impl CPU {
 
         // EOR - ind,x
         0x41 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::XIndirect),
+
+        // EOR - ind,x
+        0x51 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::IndirectY),
 
         // EOR - abs
         0x4D => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Absolute),
@@ -247,6 +267,9 @@ impl CPU {
         // ADC - ind,x
         0x61 => self.add_with_carry(AddressMode::XIndirect),
 
+        // ADC - ind,y
+        0x71 => self.add_with_carry(AddressMode::IndirectY),
+
         // ADC - abs
         0x6D => self.add_with_carry(AddressMode::Absolute),
 
@@ -259,7 +282,10 @@ impl CPU {
         // SBC - ind,x
         0xE1 => self.sub_with_carry(AddressMode::XIndirect),
 
-        // SBC - ind,x
+        // SBC - ind,y
+        0xF1 => self.sub_with_carry(AddressMode::IndirectY),
+
+        // SBC - abs
         0xED => self.sub_with_carry(AddressMode::Absolute),
 
         0x86 => { // STX-zeropage
@@ -285,6 +311,11 @@ impl CPU {
         0x81 => { // STA-ind,x
             let tmp = self.accumulator;
             self.store_u8_in_memory(tmp, AddressMode::XIndirect);
+        }
+
+        0x91 => { // STA-ind,y
+            let tmp = self.accumulator;
+            self.store_u8_in_memory(tmp, AddressMode::IndirectY);
         }
 
         0x84 => { //STY - zeropage
@@ -493,6 +524,9 @@ impl CPU {
         // AND - xindirect
         0x21 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::XIndirect),
 
+        // AND - ind,y
+        0x31 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::IndirectY),
+
         // AND absolute
         0x2D => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Absolute),
 
@@ -504,6 +538,9 @@ impl CPU {
 
         // CMP - x,ind
         0xC1 => self.compare(RegType::A, AddressMode::XIndirect),
+
+        // CMP - ind,y
+        0xD1 => self.compare(RegType::A, AddressMode::IndirectY),
 
         // CMP - abs
         0xCD => self.compare(RegType::A, AddressMode::Absolute),
@@ -631,7 +668,7 @@ impl CPU {
             }
             AddressMode::AbsoluteX => self.absolute_xy(RegType::X),
 
-            _ => panic!("address_lookup doesn't work on {:?}", addr_mode)
+            _ => panic!("memory_lookup doesn't work on {:?}", addr_mode)
         }
     }
 
@@ -684,6 +721,7 @@ impl CPU {
 
             AddressMode::Absolute => {
                 let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+                //println!("writing to {:#X}", tmp);
                 self.program_counter += 2;
                 self.bus.ram[tmp as usize] = value;
             }
@@ -738,13 +776,12 @@ impl CPU {
     fn indirect_y(&mut self) -> usize {
         let tmp = self.bus.cart.read_cart_u8(self.program_counter);
         self.program_counter += 1;
-        let lo = self.bus.ram[tmp as usize] as u32;
-        let hi = self.bus.ram[tmp.wrapping_add(1) as usize] as u32;
-        let value:u32 = hi << 8 | lo;
-        let result = value + self.index_y as u32;
-        self.status_reg.carry = result > 0xFFFF;
+        let lo = self.bus.ram[tmp as usize] as u16;
+        let hi = self.bus.ram[tmp.wrapping_add(1) as usize] as u16;
+        let value:u16 = hi << 8 | lo;
+        let result = value.wrapping_add(self.index_y as u16);
         println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
-        result as u16 as usize
+        result as usize
     }
 
     fn compare(&mut self, reg:RegType, addr_mode:AddressMode) {
@@ -767,7 +804,7 @@ impl CPU {
     fn branch(&mut self, condition: bool) {
         if condition {
             let value = self.load_u8_from_memory(AddressMode::Immediate) as i8;
-            println!("{:}", value);
+            println!("Branch: PC+{:}", value);
             if value >= 0 {
                 self.program_counter += value as u16;
             } else {

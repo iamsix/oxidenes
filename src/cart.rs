@@ -40,10 +40,10 @@ impl Cart {
 
     pub fn read_cart_u8(&self, addr: u16) -> u8 {
         let read_pos = self.map_rom(addr);
+        //println!("Read position {:#x}", read_pos)
         let value = self.rom[read_pos];
-	println!("Read byte: {:#x}", value);
-	value
-
+        println!("Read byte: {:#x}", value);
+        value
     }
 
     pub fn read_cart_u16(&self, addr: u16) -> u16 {
@@ -63,7 +63,7 @@ impl Cart {
         {
            // println!("shouldn't be here yet");
             read_pos = ((addr - PRG_ROM_LOWER_START) + INES_OFFSET) as usize;
-        } else if addr >= PRG_ROM_UPPER_START || addr <= PRG_ROM_UPPER_START + (PRG_ROM_UPPER_LEN -1) { // UPPER BLOCK
+        } else if addr >= PRG_ROM_UPPER_START && addr <= PRG_ROM_UPPER_START + (PRG_ROM_UPPER_LEN -1) { // UPPER BLOCK
             let mut block = 0;
             if self.prg_rom_banks > 1 {
             // TODO: MAPPERS!!
@@ -71,7 +71,7 @@ impl Cart {
             }
             read_pos = ((addr - PRG_ROM_UPPER_START) + block + INES_OFFSET) as usize;
         } else {
-            panic!("virtual memory address is not in the PRG rom space")
+            panic!("virtual memory address {:#X} is not in the PRG rom space", addr)
         }
 
         read_pos

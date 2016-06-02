@@ -24,8 +24,9 @@ fn main() {
 //  vector of 0xc004 for actual execution
     let _pc = cart.read_cart_u16(RESET_VECTOR_LOC);
     let pc = 0xc000;
-    let nmi = cart.read_cart_u16(NMI_VECTOR_LOC);
-    let brk = cart.read_cart_u16(IRQ_BRK_VECTOR_LOC);
+    let _nmi = cart.read_cart_u16(NMI_VECTOR_LOC);
+    let _brk = cart.read_cart_u16(IRQ_BRK_VECTOR_LOC);
+    //panic!("NMI is {:#X}", _nmi);
 
     let bus = Bus {
          ram: vec![0; RAM_LEN as usize].into_boxed_slice(),
