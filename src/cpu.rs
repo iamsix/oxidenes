@@ -1,4 +1,5 @@
 use super::*;
+use mem_map::*;
 //use std::collections::HashSet;
 
 //pub HashMap: ops;
@@ -89,13 +90,13 @@ impl CPU {
     pub fn run(&mut self) {
      loop  {
 //        break;
-        let instr = self.bus.cart.read_cart_u8(self.program_counter);
+        let instr = self.cpu_read_u8(self.program_counter);
         // TODO: Move this to a specific debug output
         let tmp:u8 = self.status_reg.into();
         println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  SP:{:02X}",
                    self.program_counter, instr, self.accumulator, self.index_x, self.index_y,
                    tmp, self.stack_pointer); //, self.status_reg);
-        //if self.program_counter == 0xda5e {break;}
+//        if self.program_counter == 0xDF63 {println!("Breaking line 99"); break;}
         self.execute_op(instr as u8);
       }
     }
@@ -110,59 +111,59 @@ impl CPU {
       match instr {
 
         0x4C => { // JMP-absolute
-            let value = self.bus.cart.read_cart_u16(self.program_counter);
+            let value = self.cpu_read_u16(self.program_counter);
             self.program_counter = value;
         }
 
         0x6C => { // JMP-indirect
-            let lotmp = self.bus.cart.read_cart_u8(self.program_counter);
-            let hitmp = self.bus.cart.read_cart_u8(self.program_counter +1);
+            let lotmp = self.cpu_read_u8(self.program_counter);
+            let hitmp = self.cpu_read_u8(self.program_counter +1);
             // because there is no carry the lo byte of effective addr wraps +1
             // see http://www.6502.org/tutorials/6502opcodes.html under JMP
 
-            let mut tmp = ((hitmp as u16) << 8 | lotmp as u16) as usize;
-            let lo = self.bus.ram[tmp] as u16;
-            tmp = ((hitmp as u16) << 8 | lotmp.wrapping_add(1) as u16) as usize;
-            let hi = self.bus.ram[tmp] as u16;
+            let mut tmp = (hitmp as u16) << 8 | lotmp as u16;
+            let lo = self.cpu_read_u8(tmp) as u16;
+            tmp = (hitmp as u16) << 8 | lotmp.wrapping_add(1) as u16;
+            let hi = self.cpu_read_u8(tmp) as u16;
             println!("ind: {:#X} JMP ${:X}${:X}", tmp, hi, lo);
             self.program_counter = hi << 8 | lo;
         }
 
         // LSR - A
-        0x4A => self.shift_right_to_A(AddressMode::Accumulator),
+        0x4A => self.shift_right_to_a(AddressMode::Accumulator),
 
         // LSR - zeropage
-        0x46 => self.shift_right_to_A(AddressMode::Zeropage),
+        0x46 => self.shift_right_to_a(AddressMode::Zeropage),
 
         // LSR - abs
-        0x4E => self.shift_right_to_A(AddressMode::Absolute),
+        0x4E => self.shift_right_to_a(AddressMode::Absolute),
 
         // ASL - A
-        0x0A => self.shift_left_to_A(AddressMode::Accumulator),
+        0x0A => self.shift_left_to_a(AddressMode::Accumulator),
 
         // ASL - zpg
-        0x06 => self.shift_left_to_A(AddressMode::Zeropage),
+        0x06 => self.shift_left_to_a(AddressMode::Zeropage),
 
         // ASL - abs
-        0x0E => self.shift_left_to_A(AddressMode::Absolute),
+        0x0E => self.shift_left_to_a(AddressMode::Absolute),
 
         // ROR - A
-        0x6A => self.rotate_right_to_A(AddressMode::Accumulator),
+        0x6A => self.rotate_right_to_a(AddressMode::Accumulator),
 
         // ROR - zpg
-        0x66 => self.rotate_right_to_A(AddressMode::Zeropage),
+        0x66 => self.rotate_right_to_a(AddressMode::Zeropage),
 
         // ROR - abs
-        0x6E => self.rotate_right_to_A(AddressMode::Absolute),
+        0x6E => self.rotate_right_to_a(AddressMode::Absolute),
 
         // ROL - A
-        0x2A => self.rotate_left_to_A(AddressMode::Accumulator),
+        0x2A => self.rotate_left_to_a(AddressMode::Accumulator),
 
         // ROL - zpg
-        0x26 => self.rotate_left_to_A(AddressMode::Zeropage),
+        0x26 => self.rotate_left_to_a(AddressMode::Zeropage),
 
         // ROL - abs
-        0x2E => self.rotate_left_to_A(AddressMode::Absolute),
+        0x2E => self.rotate_left_to_a(AddressMode::Absolute),
 
         0xA9 => { // LDA - immediate
             let value = self.load_u8_from_memory(AddressMode::Immediate);
@@ -176,6 +177,11 @@ impl CPU {
 
         0xAD => { // LDA - absolute
             let value = self.load_u8_from_memory(AddressMode::Absolute);
+            self.set_register(value, RegType::A);
+        }
+
+        0xB9 => { // LDA - absolute
+            let value = self.load_u8_from_memory(AddressMode::AbsoluteY);
             self.set_register(value, RegType::A);
         }
 
@@ -219,6 +225,11 @@ impl CPU {
             self.set_register(value, RegType::Y);
         }
 
+        0xB4 => { // LDY - zeropage,X
+            let value = self.load_u8_from_memory(AddressMode::ZeropageX);
+            self.set_register(value, RegType::Y);
+        }
+
         0x40 => { // RTI - implied
             let tmp = self.pull_stack();
             self.status_reg = tmp.into();
@@ -229,34 +240,43 @@ impl CPU {
         }
 
         // ORA - imm
-        0x09 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Immediate),
+        0x09 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Immediate),
 
         // ORA - zpg
-        0x05 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Zeropage),
+        0x05 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Zeropage),
+
+        // ORA - zpg,x
+        0x15 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::ZeropageX),
 
         // ORA - ind,x
-        0x01 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::XIndirect),
+        0x01 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::XIndirect),
 
         // ORA - ind,y
-        0x11 => self.bitwise_op_to_A(|a, m| a | m, AddressMode::IndirectY),
+        0x11 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::IndirectY),
 
         // ORA - abs
-        0x0D => self.bitwise_op_to_A(|a, m| a | m, AddressMode::Absolute),
+        0x0D => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Absolute),
+
+        // ORA - abs,y
+        0x19 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::AbsoluteY),
 
         // EOR - imm
-        0x49 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Immediate),
+        0x49 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Immediate),
 
         // EOR - zpg
-        0x45 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Zeropage),
+        0x45 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Zeropage),
 
         // EOR - ind,x
-        0x41 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::XIndirect),
+        0x41 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::XIndirect),
 
         // EOR - ind,x
-        0x51 => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::IndirectY),
+        0x51 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::IndirectY),
 
         // EOR - abs
-        0x4D => self.bitwise_op_to_A(|a, m| a ^ m, AddressMode::Absolute),
+        0x4D => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Absolute),
+
+        // EOR - abs,y
+        0x59 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::AbsoluteY),
 
         // ADC - imm
         0x69 => self.add_with_carry(AddressMode::Immediate),
@@ -273,6 +293,9 @@ impl CPU {
         // ADC - abs
         0x6D => self.add_with_carry(AddressMode::Absolute),
 
+        // ADC - abs,y
+        0x79 => self.add_with_carry(AddressMode::AbsoluteY),
+
         // SBC - imm
         0xE9 => self.sub_with_carry(AddressMode::Immediate),
 
@@ -287,6 +310,9 @@ impl CPU {
 
         // SBC - abs
         0xED => self.sub_with_carry(AddressMode::Absolute),
+
+        // SBC - abs,y
+        0xF9 => self.sub_with_carry(AddressMode::AbsoluteY),
 
         0x86 => { // STX-zeropage
             let tmp = self.index_x;
@@ -318,9 +344,21 @@ impl CPU {
             self.store_u8_in_memory(tmp, AddressMode::IndirectY);
         }
 
-        0x84 => { //STY - zeropage
+        0x99 => { // STA-abs,y
+            let tmp = self.accumulator;
+            self.store_u8_in_memory(tmp, AddressMode::AbsoluteY);
+        }
+
+        //STY - zeropage
+        0x84 => {
             let tmp = self.index_y;
             self.store_u8_in_memory(tmp, AddressMode::Zeropage);
+        }
+
+        //STY - zeropage,x
+        0x94 => {
+            let tmp = self.index_y;
+            self.store_u8_in_memory(tmp, AddressMode::ZeropageX);
         }
 
         //STY - absolute
@@ -330,7 +368,7 @@ impl CPU {
         }
 
         0x20 => { // JSR-Absolute
-            let value = self.bus.cart.read_cart_u16(self.program_counter);
+            let value = self.cpu_read_u16(self.program_counter);
             self.program_counter += 1;
 
             let hi = (self.program_counter >> 8) as u8;
@@ -516,19 +554,22 @@ impl CPU {
         }
 
         // AND - immediate
-        0x29 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Immediate),
+        0x29 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Immediate),
 
         // AND - zeropage
-        0x25 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Zeropage),
+        0x25 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Zeropage),
 
         // AND - xindirect
-        0x21 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::XIndirect),
+        0x21 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::XIndirect),
 
         // AND - ind,y
-        0x31 => self.bitwise_op_to_A(|a, m| a & m, AddressMode::IndirectY),
+        0x31 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::IndirectY),
 
         // AND absolute
-        0x2D => self.bitwise_op_to_A(|a, m| a & m, AddressMode::Absolute),
+        0x2D => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Absolute),
+
+        // AND absolute,y
+        0x39 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::AbsoluteY),
 
         // CMP - immediate
         0xC9 => self.compare(RegType::A, AddressMode::Immediate),
@@ -544,6 +585,9 @@ impl CPU {
 
         // CMP - abs
         0xCD => self.compare(RegType::A, AddressMode::Absolute),
+
+        // CMP - abs,y
+        0xD9 => self.compare(RegType::A, AddressMode::AbsoluteY),
 
         // CPY - immediate
         0xC0 => self.compare(RegType::Y, AddressMode::Immediate),
@@ -567,7 +611,7 @@ impl CPU {
       }
     }
 
-    fn rotate_right_to_A(&mut self, addr_mode: AddressMode) {
+    fn rotate_right_to_a(&mut self, addr_mode: AddressMode) {
         let value = self.load_u8_from_memory(addr_mode);
         let c = if self.status_reg.carry { 1 } else { 0 };
         self.status_reg.carry = (value & (1 << 0)) != 0;
@@ -575,7 +619,7 @@ impl CPU {
         self.set_register(value, RegType::A);
     }
 
-    fn rotate_left_to_A(&mut self, addr_mode: AddressMode) {
+    fn rotate_left_to_a(&mut self, addr_mode: AddressMode) {
         let value = self.load_u8_from_memory(addr_mode);
         let c = if self.status_reg.carry { 1 } else { 0 };
         self.status_reg.carry = (value & (1 << 7)) != 0;
@@ -583,21 +627,21 @@ impl CPU {
         self.set_register(value, RegType::A);
     }
 
-    fn shift_right_to_A(&mut self, addr_mode: AddressMode) {
+    fn shift_right_to_a(&mut self, addr_mode: AddressMode) {
         let value = self.load_u8_from_memory(addr_mode);
         self.status_reg.carry = (value & (1 << 0)) != 0;
         let value = value >> 1;
         self.set_register(value, RegType::A);
     }
 
-    fn shift_left_to_A(&mut self, addr_mode: AddressMode) { // ASL - zeropage
+    fn shift_left_to_a(&mut self, addr_mode: AddressMode) { // ASL - zeropage
         let value = self.load_u8_from_memory(addr_mode);
         self.status_reg.carry = (value & (1 << 7)) != 0;
         let value = ((value as u16) << 1) as u8;
         self.set_register(value, RegType::A);
     }
 
-    fn bitwise_op_to_A<F>(&mut self, f: F, addr_mode: AddressMode)
+    fn bitwise_op_to_a<F>(&mut self, f: F, addr_mode: AddressMode)
                           where F: FnOnce(u8, u8) -> u8 {
 
         let m = self.load_u8_from_memory(addr_mode);
@@ -635,34 +679,34 @@ impl CPU {
     }
 
     fn increment_memory(&mut self, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode);
-        let mut value = self.bus.ram[addr];
+        let addr = self.memory_lookup(addr_mode) as u16;
+        let mut value = self.cpu_read_u8(addr);
         value = value.wrapping_add(1);
         self.status_reg.zero = value == 0;
         self.status_reg.negative_sign = (value & (1 << 7)) != 0;
-        self.bus.ram[addr] = value;
+        self.cpu_write_u8(addr, value);
     }
 
     fn decrement_memory(&mut self, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode);
-        let mut value = self.bus.ram[addr];
+        let addr = self.memory_lookup(addr_mode) as u16;
+        let mut value = self.cpu_read_u8(addr);
         value = value.wrapping_sub(1);
         self.status_reg.zero = value == 0;
         self.status_reg.negative_sign = (value & (1 << 7)) != 0;
-        self.bus.ram[addr] = value;
+        self.cpu_write_u8(addr, value);
     }
 
     fn memory_lookup(&mut self, addr_mode: AddressMode) -> usize {
         match addr_mode {
             AddressMode::Zeropage => {
-                let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+                let tmp = self.cpu_read_u8(self.program_counter);
                 self.program_counter += 1;
                 tmp as usize
             }
 
             AddressMode::ZeropageX => self.zeropage_xy(RegType::X),
             AddressMode::Absolute => {
-                let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+                let tmp = self.cpu_read_u16(self.program_counter);
                 self.program_counter += 2;
                 tmp as usize
             }
@@ -677,79 +721,97 @@ impl CPU {
             AddressMode::Accumulator => self.accumulator,
             AddressMode::Immediate => {
                 self.program_counter += 1;
-                self.bus.cart.read_cart_u8(self.program_counter - 1)
+                self.cpu_read_u8(self.program_counter - 1)
             }
 
             AddressMode::Zeropage => {
-                let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+                let tmp = self.cpu_read_u8(self.program_counter) as u16;
                 self.program_counter += 1;
-                self.bus.ram[tmp as usize]
+                self.cpu_read_u8(tmp)
             }
 
-            AddressMode::ZeropageX => self.bus.ram[self.zeropage_xy(RegType::X)],
+            AddressMode::ZeropageX => {
+                let tmp = self.zeropage_xy(RegType::X) as u16;
+                self.cpu_read_u8(tmp)
+            }
 
-            AddressMode::ZeropageY => self.bus.ram[self.zeropage_xy(RegType::Y)],
+            AddressMode::ZeropageY => {
+                let tmp = self.zeropage_xy(RegType::Y) as u16;
+                self.cpu_read_u8(tmp)
+            }
 
             AddressMode::Absolute => {
-                let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+                let tmp = self.cpu_read_u16(self.program_counter);
                 self.program_counter += 2;
-                self.bus.ram[tmp as usize]
+                self.cpu_read_u8(tmp)
             }
 
-            AddressMode::AbsoluteX => self.bus.ram[self.absolute_xy(RegType::X)],
+            AddressMode::AbsoluteX => {
+                let tmp = self.absolute_xy(RegType::X) as u16;
+                self.cpu_read_u8(tmp)
+            }
 
-            AddressMode::AbsoluteY => self.bus.ram[self.absolute_xy(RegType::Y)],
+            AddressMode::AbsoluteY => {
+                let tmp = self.absolute_xy(RegType::Y) as u16;
+                self.cpu_read_u8(tmp)
+            }
 
-            AddressMode::XIndirect => self.bus.ram[self.x_indirect()],
+            AddressMode::XIndirect => {
+                let tmp = self.x_indirect() as u16;
+                self.cpu_read_u8(tmp)
+            }
 
-            AddressMode::IndirectY => self.bus.ram[self.indirect_y()],
-
+            AddressMode::IndirectY => {
+                let tmp = self.indirect_y() as u16;
+                self.cpu_read_u8(tmp)
+            }
         }
     }
 
     fn store_u8_in_memory(&mut self, value: u8, addr_mode: AddressMode) {
-        match addr_mode {
+        let addr:u16 = match addr_mode {
             AddressMode::Zeropage => {
-                let tmp = self.bus.cart.read_cart_u8(self.program_counter) as usize;
+                let tmp = self.cpu_read_u8(self.program_counter) as u16;
                 self.program_counter += 1;
-                self.bus.ram[tmp] = value;
+                tmp
             }
 
-            AddressMode::ZeropageX => self.bus.ram[self.zeropage_xy(RegType::X)] = value,
+            AddressMode::ZeropageX => self.zeropage_xy(RegType::X) as u16,
 
-            AddressMode::ZeropageY => self.bus.ram[self.zeropage_xy(RegType::Y)] = value,
+            AddressMode::ZeropageY => self.zeropage_xy(RegType::Y) as u16,
 
             AddressMode::Absolute => {
-                let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+                let tmp = self.cpu_read_u16(self.program_counter);
                 //println!("writing to {:#X}", tmp);
                 self.program_counter += 2;
-                self.bus.ram[tmp as usize] = value;
+                tmp
             }
 
-            AddressMode::AbsoluteX => self.bus.ram[self.absolute_xy(RegType::X)] = value,
+            AddressMode::AbsoluteX => self.absolute_xy(RegType::X) as u16,
 
-            AddressMode::AbsoluteY => self.bus.ram[self.absolute_xy(RegType::Y)] = value,
+            AddressMode::AbsoluteY => self.absolute_xy(RegType::Y) as u16,
 
-            AddressMode::XIndirect => self.bus.ram[self.x_indirect()] = value,
+            AddressMode::XIndirect => self.x_indirect() as u16,
 
-            AddressMode::IndirectY => self.bus.ram[self.indirect_y()] = value,
+            AddressMode::IndirectY => self.indirect_y() as u16,
 
-            _ => panic!("It's not possible to write with {:?}", addr_mode),
+            _ => panic!("It's not possible to write with {:?} mode", addr_mode),
 
-        }
+        };
+        self.cpu_write_u8(addr, value);
     }
 
     fn x_indirect(&mut self) -> usize {
-        let mut tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        let mut tmp = self.cpu_read_u8(self.program_counter);
         self.program_counter += 1;
         tmp = tmp.wrapping_add(self.index_x);
-        let lo = self.bus.ram[tmp as usize] as usize;
-        let hi = self.bus.ram[(tmp.wrapping_add(1)) as usize] as usize;
+        let lo = self.cpu_read_u8(tmp as u16) as usize;
+        let hi = self.cpu_read_u8((tmp.wrapping_add(1)) as u16) as usize;
         hi << 8 | lo
     }
 
     fn zeropage_xy(&mut self, reg: RegType) -> usize {
-        let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        let tmp = self.cpu_read_u8(self.program_counter);
         self.program_counter += 1;
         match reg {
             RegType::X => tmp.wrapping_add(self.index_x) as usize,
@@ -758,26 +820,27 @@ impl CPU {
         }
     }
 
-    // wrapping add?
+    // afaik I can ignore 'with carry' in the description because I'm using a u16
     fn absolute_xy(&mut self, reg: RegType) -> usize {
-        let tmp = self.bus.cart.read_cart_u16(self.program_counter);
+        let tmp = self.cpu_read_u16(self.program_counter);
         self.program_counter += 2;
         let result = match reg {
-            RegType::X => (tmp + self.index_x as u16) as usize,
-            RegType::Y => (tmp + self.index_y as u16) as usize,
+            RegType::X => (tmp.wrapping_add(self.index_x as u16)) as usize,
+            RegType::Y => (tmp.wrapping_add(self.index_y as u16)) as usize,
             _ => panic!("can not abs,A")
         };
-        println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X}", reg, tmp,self.index_x, self.index_y);
-        panic!("carry not yet implemented here, it might fail if I continue");
-        // TODO: implement carry
+        println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X} = {:#X}",
+                  reg, tmp,self.index_x, self.index_y, result);
+
         result
     }
 
     fn indirect_y(&mut self) -> usize {
-        let tmp = self.bus.cart.read_cart_u8(self.program_counter);
+        let tmp = self.cpu_read_u8(self.program_counter);
         self.program_counter += 1;
-        let lo = self.bus.ram[tmp as usize] as u16;
-        let hi = self.bus.ram[tmp.wrapping_add(1) as usize] as u16;
+        // ram read
+        let lo = self.cpu_read_u8(tmp as u16) as u16;
+        let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
         let value:u16 = hi << 8 | lo;
         let result = value.wrapping_add(self.index_y as u16);
         println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
@@ -827,14 +890,114 @@ impl CPU {
     }
 
     fn push_stack (&mut self, value: u8) {
-        self.bus.ram[0x100 + self.stack_pointer as usize] = value;
+        let addr = 0x100 + self.stack_pointer as u16;
+        self.cpu_write_u8(addr, value);
         println!("stack wrote at 0x01{:x}: {:x}", self.stack_pointer, value);
         self.stack_pointer -= 1;
     }
 
     fn pull_stack (&mut self) -> u8 {
         self.stack_pointer += 1;
-        self.bus.ram[0x100 + self.stack_pointer as usize]
+        self.cpu_read_u8(0x100 + self.stack_pointer as u16)
+    }
+
+    fn cpu_read_u8(&self, addr: u16) -> u8 {
+        match addr {
+            RAM_START ... RAM_VIRTUAL_END => {
+                let addr = addr % RAM_LEN;
+                self.bus.ram[addr as usize]
+            }
+
+            PPU_REGISTERS_START ... PPU_REGISTERS_VIRTUAL_END=> {
+                panic!("PPU is unimplemented")
+            }
+
+            APU_REGISTERS_START ... APU_REGISTERS_END => {
+                panic!("APU is unimplemented")
+            }
+
+            EXPANSION_ROM_START ... EXPANSION_ROM_END => {
+                // Used by some mappers, can usually be ignored
+                panic!("Expansion rom is unimplemented")
+            }
+
+            SRAM_START ... SRAM_END => {
+                panic!("SRAM is unimplemented")
+            }
+
+            PRG_ROM_START ... PRG_ROM_END => {
+                self.bus.cart.read_cart_u8(addr)
+            }
+
+            _ => panic!("Invalid read location {:#X}", addr)
+        }
+    }
+
+    // The actual 6502 can't read a u16, this is for convenince only
+    fn cpu_read_u16(&self, addr: u16) -> u16 {
+        match addr {
+            RAM_START ... RAM_VIRTUAL_END => {
+                let addr = addr % RAM_LEN;
+                let lo = self.bus.ram[addr as usize] as u16;
+                let hi = self.bus.ram[(addr as usize) + 1] as u16;
+                hi << 8 | lo
+            }
+
+            PPU_REGISTERS_START ... PPU_REGISTERS_VIRTUAL_END=> {
+                panic!("PPU is unimplemented")
+            }
+
+            APU_REGISTERS_START ... APU_REGISTERS_END => {
+                panic!("APU is unimplemented")
+            }
+
+            EXPANSION_ROM_START ... EXPANSION_ROM_END => {
+                // Used by some mappers, can usually be ignored
+                panic!("Expansion rom is unimplemented")
+            }
+
+            SRAM_START ... SRAM_END => {
+                panic!("SRAM is unimplemented")
+            }
+
+            PRG_ROM_START ... PRG_ROM_END => {
+                self.bus.cart.read_cart_u16(addr)
+            }
+
+            _ => panic!("Invalid read location {:#X}", addr)
+        }
+    }
+
+    fn cpu_write_u8(&mut self, addr: u16, value: u8) {
+        match addr {
+            RAM_START ... RAM_VIRTUAL_END => {
+                let addr = addr % RAM_LEN;
+                self.bus.ram[addr as usize] = value
+            }
+
+            PPU_REGISTERS_START ... PPU_REGISTERS_VIRTUAL_END=> {
+                panic!("PPU is unimplemented")
+            }
+
+            APU_REGISTERS_START ... APU_REGISTERS_END => {
+                panic!("APU is unimplemented")
+            }
+
+            EXPANSION_ROM_START ... EXPANSION_ROM_END => {
+                // Used by some mappers, can usually be ignored
+                panic!("Expansion rom is unimplemented")
+            }
+
+            SRAM_START ... SRAM_END => {
+                panic!("SRAM is unimplemented")
+            }
+
+            PRG_ROM_START ... PRG_ROM_END => {
+                panic!("Can't write to PRG rom location")
+            }
+
+            _ => panic!("Invalid write location {:#X}", addr)
+        }
     }
 
     // peek_stack??
