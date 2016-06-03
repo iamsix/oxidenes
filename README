@@ -1,1 +1,4 @@
-A test emulator in Rust. Currently just implementing CPU ops - in bad need of a refactor
+OxideNES 
+A NES emulator in Rust. 
+
+Currently just implementing CPU ops
