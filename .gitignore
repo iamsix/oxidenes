@@ -1,6 +1,7 @@
 target/
 *.nes
 *.swp
+*.bk
 *~
 \#*\#
 /.emacs.desktop
