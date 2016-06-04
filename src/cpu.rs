@@ -6,38 +6,28 @@ use mem_map::*;
 
 #[derive(Debug)]
 pub struct CPU {
-    // A
-    accumulator: u8,
+    accumulator: u8, // A
 
-    index_x: u8,
-    index_y: u8,
-    // P
-    status_reg: StatusReg,
-    program_counter: u16,
-    // PCL: u8 is pc low   --
-    // PCH: u8 is pc high  -- here just represented as a single u16
-    // S or SP
-    stack_pointer: u8,
+    index_x: u8, // X
+    index_y: u8, // Y
+
+    status_reg: StatusReg, // P
+    program_counter: u16,  // PC - should be PCHI/PCLO but easier this way
+    stack_pointer: u8, // S or SP
+
     bus: Bus
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct StatusReg {
-    // N (or sometimes S)
-    negative_sign: bool,
-    // V
-    overflow: bool,
+    negative_sign: bool, // N (or sometimes S)
+    overflow: bool, // V
     unused: bool, // always 1
-    // B
-    break_flag: bool,
-    // D
-    decimal_mode: bool,  // unimplemented on NES
-    // I
-    interrupt_disable: bool,
-    // Z
-    zero: bool,
-    // C
-    carry: bool,
+    break_flag: bool, // B
+    decimal_mode: bool, // D - unimplemented on NES but still sets/clears
+    interrupt_disable: bool, // I
+    zero: bool, // Z
+    carry: bool, // C
 }
 
 #[derive(Debug)]
@@ -86,7 +76,9 @@ impl CPU {
         println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  SP:{:02X}",
                    self.program_counter, instr, self.accumulator, self.index_x, self.index_y,
                    tmp, self.stack_pointer); //, self.status_reg);
-//        if self.program_counter == 0xe931 {println!("Breaking line 99"); break;}
+
+       // if self.program_counter == 0xf327 {println!("Breaking line 80"); break;}
+
         self.execute_op(instr as u8);
       }
     }
@@ -117,64 +109,65 @@ impl CPU {
         }
 
         // LSR - A
-        0x4A => self.shift_right_to_a(AddressMode::Accumulator),
+        0x4A => self.shift_right(AddressMode::Accumulator),
 
         // LSR - zeropage
-        0x46 => self.shift_right_to_a(AddressMode::Zeropage),
+        0x46 => self.shift_right(AddressMode::Zeropage),
 
         // LSR - zeropage,x
-        0x56 => self.shift_right_to_a(AddressMode::ZeropageX),
+        0x56 => self.shift_right(AddressMode::ZeropageX),
 
         // LSR - abs
-        0x4E => self.shift_right_to_a(AddressMode::Absolute),
+        0x4E => self.shift_right(AddressMode::Absolute),
 
         // LSR - abs,x
-        0x5E => self.shift_right_to_a(AddressMode::AbsoluteX),
+        0x5E => self.shift_right(AddressMode::AbsoluteX),
 
         // ASL - A
-        0x0A => self.shift_left_to_a(AddressMode::Accumulator),
+        0x0A => self.shift_left(AddressMode::Accumulator),
 
         // ASL - zpg
-        0x06 => self.shift_left_to_a(AddressMode::Zeropage),
+        0x06 => self.shift_left(AddressMode::Zeropage),
 
         // ASL - zpg,x
-        0x16 => self.shift_left_to_a(AddressMode::ZeropageX),
+        0x16 => self.shift_left(AddressMode::ZeropageX),
 
         // ASL - abs
-        0x0E => self.shift_left_to_a(AddressMode::Absolute),
+        0x0E => self.shift_left(AddressMode::Absolute),
 
         // ASL - abs,x
-        0x1E => self.shift_left_to_a(AddressMode::AbsoluteX),
+        0x1E => self.shift_left(AddressMode::AbsoluteX),
 
         // ROR - A
-        0x6A => self.rotate_right_to_a(AddressMode::Accumulator),
+        0x6A => self.rotate_right(AddressMode::Accumulator),
 
         // ROR - zpg
-        0x66 => self.rotate_right_to_a(AddressMode::Zeropage),
+        0x66 => self.rotate_right(AddressMode::Zeropage),
 
         // ROR - zpg,x
-        0x76 => self.rotate_right_to_a(AddressMode::ZeropageX),
+        0x76 => self.rotate_right(AddressMode::ZeropageX),
 
         // ROR - abs
-        0x6E => self.rotate_right_to_a(AddressMode::Absolute),
+        0x6E => self.rotate_right(AddressMode::Absolute),
 
         // ROR - abs,x
-        0x7E => self.rotate_right_to_a(AddressMode::AbsoluteX),
+        0x7E => self.rotate_right(AddressMode::AbsoluteX),
 
         // ROL - A
-        0x2A => self.rotate_left_to_a(AddressMode::Accumulator),
+        0x2A => self.rotate_left(AddressMode::Accumulator),
 
         // ROL - zpg
-        0x26 => self.rotate_left_to_a(AddressMode::Zeropage),
+        0x26 => self.rotate_left(AddressMode::Zeropage),
 
         // ROL - zpg,x
-        0x36 => self.rotate_left_to_a(AddressMode::ZeropageX),
+        0x36 => self.rotate_left(AddressMode::ZeropageX),
 
         // ROL - abs
-        0x2E => self.rotate_left_to_a(AddressMode::Absolute),
+        0x2E => self.rotate_left(AddressMode::Absolute),
 
         // ROL - abs,x
-        0x3E => self.rotate_left_to_a(AddressMode::AbsoluteX),
+        0x3E => self.rotate_left(AddressMode::AbsoluteX),
+
 
         // LDA - immediate
         0xA9 => {
@@ -224,6 +217,7 @@ impl CPU {
             self.set_register(value, RegType::A);
         }
 
+
         // LDX-immediate
         0xA2 => {
             let value = self.load_u8_from_memory(AddressMode::Immediate);
@@ -253,6 +247,7 @@ impl CPU {
             let value = self.load_u8_from_memory(AddressMode::ZeropageY);
             self.set_register(value, RegType::X);
         }
+
 
         // LDY-immediate
         0xA0 => {
@@ -294,6 +289,7 @@ impl CPU {
             self.program_counter = value;
         }
 
+
         // ORA - imm
         0x09 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Immediate),
 
@@ -317,6 +313,7 @@ impl CPU {
 
         // ORA - abs,x
         0x1D => self.bitwise_op_to_a(|a, m| a | m, AddressMode::AbsoluteX),
+
 
         // EOR - imm
         0x49 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Immediate),
@@ -342,6 +339,7 @@ impl CPU {
         // EOR - abs,x
         0x5D => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::AbsoluteX),
 
+
         // ADC - imm
         0x69 => self.add_with_carry(AddressMode::Immediate),
 
@@ -365,6 +363,7 @@ impl CPU {
 
         // ADC - abs,x
         0x7D => self.add_with_carry(AddressMode::AbsoluteX),
+
 
         // SBC - imm
         0xE9 => self.sub_with_carry(AddressMode::Immediate),
@@ -390,6 +389,7 @@ impl CPU {
         // SBC - abs,x
         0xFD => self.sub_with_carry(AddressMode::AbsoluteX),
 
+
         // STX-zeropage
         0x86 => {
             let tmp = self.index_x;
@@ -407,6 +407,7 @@ impl CPU {
             let tmp = self.index_x;
             self.store_u8_in_memory(tmp, AddressMode::Absolute);
         }
+
 
         // STA-zeropage
         0x85 => {
@@ -450,6 +451,7 @@ impl CPU {
             self.store_u8_in_memory(tmp, AddressMode::AbsoluteX);
         }
 
+
         //STY - zeropage
         0x84 => {
             let tmp = self.index_y;
@@ -468,6 +470,7 @@ impl CPU {
             self.store_u8_in_memory(tmp, AddressMode::Absolute);
         }
 
+
         // JSR-Absolute
         0x20 => {
             let value = self.cpu_read_u16(self.program_counter);
@@ -482,7 +485,7 @@ impl CPU {
         }
 
         // NOP // TODO: 2 cycles
-        0xEA => println!("NOP"),
+        0xEA => {} // println!("NOP"),
 
         0xA8 => { //TAY - impl
             let tmp = self.accumulator;
@@ -519,6 +522,7 @@ impl CPU {
             self.set_register(tmp, RegType::X)
         }
 
+
         // INC - zeropage
         0xE6 => self.increment_memory(AddressMode::Zeropage),
 
@@ -531,6 +535,7 @@ impl CPU {
         // INC - absolute,x
         0xFE => self.increment_memory(AddressMode::AbsoluteX),
 
+
         // DEC - zeropage
         0xC6 => self.decrement_memory(AddressMode::Zeropage),
 
@@ -542,6 +547,7 @@ impl CPU {
 
         // DEC - absolute,x
         0xDE => self.decrement_memory(AddressMode::AbsoluteX),
+
 
         // DEX - impl
         0xCA => {
@@ -574,10 +580,11 @@ impl CPU {
             self.branch(tmp)
         }
 
-        0x90 => { // BCS - relative - 2 bytes
+        0x90 => { // BCC - relative - 2 bytes
             let tmp = !self.status_reg.carry;
             self.branch(tmp)
         },
+
 
         0xf0 => { // BEQ - relative
             let tmp = self.status_reg.zero;
@@ -599,10 +606,11 @@ impl CPU {
             self.branch(tmp)
         }
 
+
         0x24 => { // BIT - zeropage
             let value = self.load_u8_from_memory(AddressMode::Zeropage);
             let result = self.accumulator & value;
-            println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
+//            println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
             self.status_reg.zero = result == 0;
             self.status_reg.negative_sign = (value & (1 << 7)) != 0;
             self.status_reg.overflow = (value & (1 << 6)) != 0;
@@ -611,11 +619,12 @@ impl CPU {
         0x2C => { // BIT - absolute
             let value = self.load_u8_from_memory(AddressMode::Absolute);
             let result = self.accumulator & value;
-            println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
+ //           println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
             self.status_reg.zero = result == 0;
             self.status_reg.negative_sign = (value & (1 << 7)) != 0;
             self.status_reg.overflow = (value & (1 << 6)) != 0;
         }
+
 
         0x60 => { // RTS - implied
             let lo = self.pull_stack() as u16;
@@ -645,6 +654,7 @@ impl CPU {
         // CLV - impl
         0xB8 => self.status_reg.overflow = false,
 
+
         // PHP - impl
         0x08 => {
             let mut tmp:u8 = self.status_reg.into();
@@ -672,6 +682,7 @@ impl CPU {
             self.push_stack(tmp);
         }
 
+
         // AND - immediate
         0x29 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Immediate),
 
@@ -695,6 +706,7 @@ impl CPU {
 
         // AND absolute,x
         0x3D => self.bitwise_op_to_a(|a, m| a & m, AddressMode::AbsoluteX),
+
 
         // CMP - immediate
         0xC9 => self.compare(RegType::A, AddressMode::Immediate),
@@ -720,6 +732,7 @@ impl CPU {
         // CMP - abs,x
         0xDD => self.compare(RegType::A, AddressMode::AbsoluteX),
 
+
         // CPY - immediate
         0xC0 => self.compare(RegType::Y, AddressMode::Immediate),
 
@@ -728,6 +741,7 @@ impl CPU {
 
         // CPY - abs
         0xCC => self.compare(RegType::Y, AddressMode::Absolute),
+
 
         // CPX - immediate
         0xE0 => self.compare(RegType::X, AddressMode::Immediate),
@@ -748,13 +762,13 @@ impl CPU {
         0x5A |
         0x7A |
         0xDA |
-        0xFA => println!("NOP - impl - ndocumented Opcode ${:X}", instr),
+        0xFA => {} // println!("NOP - impl - ndocumented Opcode ${:X}", instr),
 
         // DOP - Zeropage - undocumented Opcode
         0x04 |
         0x44 |
         0x64 => {
-            println!("DOP zpg - undocumented Opcode ${:X}", instr);
+ //           println!("DOP zpg - undocumented Opcode ${:X}", instr);
             self.program_counter += 1;
         }
 
@@ -764,7 +778,7 @@ impl CPU {
         0x89 |
         0xC2 |
         0xE2 => {
-            println!("DOP imm - undocumented Opcode ${:X}", instr);
+//            println!("DOP imm - undocumented Opcode ${:X}", instr);
             self.program_counter += 1;
         }
 
@@ -775,13 +789,13 @@ impl CPU {
         0x74 |
         0xD4 |
         0xF4 => {
-            println!("DOP zpg,x - undocumented Opcode ${:X}", instr);
+ //           println!("DOP zpg,x - undocumented Opcode ${:X}", instr);
             self.program_counter += 1;
         }
 
         // TOP - abs - Undocumented Opcode.
         0x0C => {
-            println!("TOP abs - undocumented Opcode ${:X}", instr);
+//            println!("TOP abs - undocumented Opcode ${:X}", instr);
             self.program_counter += 2;
         }
 
@@ -792,9 +806,10 @@ impl CPU {
         0x7C |
         0xDC |
         0xFC => {
-            println!("TOP abs,x - undocumented Opcode ${:X}", instr);
+//            println!("TOP abs,x - undocumented Opcode ${:X}", instr);
             self.program_counter += 2;
         }
+
 
         // LAX - Ind,x - Undocumented Opcode
         0xA3 => {
@@ -857,47 +872,47 @@ impl CPU {
 
 
         // DCP / DCM - zpg - Undocumented Opcode
-        0xC7 => self.decrement_and_compare(AddressMode::Zeropage),
+        0xC7 => self.dec_then_cmp(AddressMode::Zeropage),
 
         // DCP / DCM - zpg,x - Undocumented Opcode
-        0xD7 => self.decrement_and_compare(AddressMode::ZeropageX),
+        0xD7 => self.dec_then_cmp(AddressMode::ZeropageX),
 
         // DCP / DCM - abs - Undocumented Opcode
-        0xCF => self.decrement_and_compare(AddressMode::Absolute),
+        0xCF => self.dec_then_cmp(AddressMode::Absolute),
 
         // DCP / DCM - abs,x - Undocumented Opcode
-        0xDF => self.decrement_and_compare(AddressMode::AbsoluteX),
+        0xDF => self.dec_then_cmp(AddressMode::AbsoluteX),
 
         // DCP / DCM - abs,y - Undocumented Opcode
-        0xDB => self.decrement_and_compare(AddressMode::AbsoluteY),
+        0xDB => self.dec_then_cmp(AddressMode::AbsoluteY),
 
         // DCP / DCM - ind,x - Undocumented Opcode
-        0xC3 => self.decrement_and_compare(AddressMode::XIndirect),
+        0xC3 => self.dec_then_cmp(AddressMode::XIndirect),
 
         // DCP / DCM - ind,y - Undocumented Opcode
-        0xD3 => self.decrement_and_compare(AddressMode::IndirectY),
+        0xD3 => self.dec_then_cmp(AddressMode::IndirectY),
 
 
         // ISC / ISB / INS - zpg - undocumented
-        0xE7 => self.increment_then_sbc(AddressMode::Zeropage),
+        0xE7 => self.inc_then_sbc(AddressMode::Zeropage),
 
         // ISC / ISB / INS - zpg,x - undocumented
-        0xF7 => self.increment_then_sbc(AddressMode::ZeropageX),
+        0xF7 => self.inc_then_sbc(AddressMode::ZeropageX),
 
         // ISC / ISB / INS - abs - undocumented
-        0xEF => self.increment_then_sbc(AddressMode::Absolute),
+        0xEF => self.inc_then_sbc(AddressMode::Absolute),
 
         // ISC / ISB / INS - abs,x - undocumented
-        0xFF => self.increment_then_sbc(AddressMode::AbsoluteX),
+        0xFF => self.inc_then_sbc(AddressMode::AbsoluteX),
 
         // ISC / ISB / INS - abs,y - undocumented
-        0xFB => self.increment_then_sbc(AddressMode::AbsoluteY),
+        0xFB => self.inc_then_sbc(AddressMode::AbsoluteY),
 
         // ISC / ISB / INS - ind,x - undocumented
-        0xE3 => self.increment_then_sbc(AddressMode::XIndirect),
+        0xE3 => self.inc_then_sbc(AddressMode::XIndirect),
 
         // ISC / ISB / INS - ind,y - undocumented
-        0xF3 => self.increment_then_sbc(AddressMode::IndirectY),
+        0xF3 => self.inc_then_sbc(AddressMode::IndirectY),
 
 
         // SLO / ASO - zpg - undocumented
@@ -922,38 +937,117 @@ impl CPU {
         0x13 => self.asl_then_ora(AddressMode::IndirectY),
 
 
+        // RLA - zpg - undocumented
+        0x27 => self.rol_then_and(AddressMode::Zeropage),
+
+        // RLA - zpg,x - undocumented
+        0x37 => self.rol_then_and(AddressMode::ZeropageX),
+
+        // RLA - abs - undocumented
+        0x2F => self.rol_then_and(AddressMode::Absolute),
+
+        // RLA - abs,x - undocumented
+        0x3F => self.rol_then_and(AddressMode::AbsoluteX),
+
+        // RLA - abs,y - undocumented
+        0x3B => self.rol_then_and(AddressMode::AbsoluteY),
+
+        // RLA - ind,x - undocumented
+        0x23 => self.rol_then_and(AddressMode::XIndirect),
+
+        // RLA - ind,y - undocumented
+        0x33 => self.rol_then_and(AddressMode::IndirectY),
+
+
+        // SRE / LSE - zpg - undocumented
+        0x47 => self.lsr_then_eor(AddressMode::Zeropage),
+
+        // SRE / LSE - zpg,x - undocumented
+        0x57 => self.lsr_then_eor(AddressMode::ZeropageX),
+
+        // SRE / LSE - abs - undocumented
+        0x4F => self.lsr_then_eor(AddressMode::Absolute),
+
+        // SRE / LSE - abs,x - undocumented
+        0x5F => self.lsr_then_eor(AddressMode::AbsoluteX),
+
+        // SRE / LSE - abs,y - undocumented
+        0x5B => self.lsr_then_eor(AddressMode::AbsoluteY),
+
+        // SRE / LSE - ind,x - undocumented
+        0x43 => self.lsr_then_eor(AddressMode::XIndirect),
+
+        // SRE / LSE - ind,y - undocumented
+        0x53 => self.lsr_then_eor(AddressMode::IndirectY),
+
+
+        // RRA - zpg - undocumented
+        0x67 => self.ror_then_adc(AddressMode::Zeropage),
+
+        // RRA - zpg,x - undocumented
+        0x77 => self.ror_then_adc(AddressMode::ZeropageX),
+
+        // RRA - abs - undocumented
+        0x6F => self.ror_then_adc(AddressMode::Absolute),
+
+        // RRA - abs,x - undocumented
+        0x7F => self.ror_then_adc(AddressMode::AbsoluteX),
+
+        // RRA - abs,y - undocumented
+        0x7B => self.ror_then_adc(AddressMode::AbsoluteY),
+
+        // RRA - ind,x - undocumented
+        0x63 => self.ror_then_adc(AddressMode::XIndirect),
+
+        // RRA - ind,y - undocumented
+        0x73 => self.ror_then_adc(AddressMode::IndirectY),
+
+
 
 
         _ => panic!("The opcode: {:#x} is unrecognized", instr)
       }
     }
 
-    fn asl_then_ora (&mut self, addr_mode: AddressMode) {
-        self.shift_left_to_a(addr_mode);
-        if addr_mode == AddressMode::Absolute ||
-           addr_mode == AddressMode::AbsoluteX ||
-           addr_mode == AddressMode::AbsoluteY {
-            self.program_counter -= 2;
-        } else {
-            self.program_counter -= 1;
-        }
-        self.bitwise_op_to_a(|a, m| a | m, addr_mode)
+
+    fn ror_then_adc(&mut self, addr_mode: AddressMode) {
+        self.rotate_right(addr_mode);
+        self.reset_pc_for_double_op(addr_mode);
+        self.add_with_carry(addr_mode);
     }
 
-    fn decrement_and_compare(&mut self, addr_mode: AddressMode) {
+    fn lsr_then_eor(&mut self, addr_mode: AddressMode) {
+        self.shift_right(addr_mode);
+        self.reset_pc_for_double_op(addr_mode);
+        self.bitwise_op_to_a(|a, m| a ^ m, addr_mode);
+    }
+
+    fn rol_then_and(&mut self, addr_mode: AddressMode) {
+        self.rotate_left(addr_mode);
+        self.reset_pc_for_double_op(addr_mode);
+        self.bitwise_op_to_a(|a, m| a & m, addr_mode);
+    }
+
+    fn asl_then_ora(&mut self, addr_mode: AddressMode) {
+        self.shift_left(addr_mode);
+        self.reset_pc_for_double_op(addr_mode);
+        self.bitwise_op_to_a(|a, m| a | m, addr_mode);
+    }
+
+    fn dec_then_cmp(&mut self, addr_mode: AddressMode) {
         self.decrement_memory(addr_mode);
-        if addr_mode == AddressMode::Absolute ||
-           addr_mode == AddressMode::AbsoluteX ||
-           addr_mode == AddressMode::AbsoluteY {
-            self.program_counter -= 2;
-        } else {
-            self.program_counter -= 1;
-        }
+        self.reset_pc_for_double_op(addr_mode);
         self.compare(RegType::A, addr_mode);
     }
 
-    fn increment_then_sbc(&mut self, addr_mode: AddressMode) {
+    // ISB
+    fn inc_then_sbc(&mut self, addr_mode: AddressMode) {
         self.increment_memory(addr_mode);
+        self.reset_pc_for_double_op(addr_mode);
+        self.sub_with_carry(addr_mode);
+    }
+
+    fn reset_pc_for_double_op(&mut self, addr_mode: AddressMode) {
         if addr_mode == AddressMode::Absolute ||
            addr_mode == AddressMode::AbsoluteX ||
            addr_mode == AddressMode::AbsoluteY {
@@ -961,44 +1055,106 @@ impl CPU {
         } else {
             self.program_counter -= 1;
         }
-        self.sub_with_carry(addr_mode)
     }
 
-    fn and_x_a_store (&mut self, addr_mode: AddressMode) {
+    // does NOT effect flags
+    fn and_x_a_store(&mut self, addr_mode: AddressMode) {
         let value = self.index_x & self.accumulator;
-        self.status_reg.zero = value == 0;
-        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
         self.store_u8_in_memory(value, addr_mode)
     }
 
-    fn rotate_right_to_a(&mut self, addr_mode: AddressMode) {
-        let value = self.load_u8_from_memory(addr_mode);
+    fn rotate_right(&mut self, addr_mode: AddressMode) {
+        let value:u8;
+        let addr:u16;
+        if addr_mode == AddressMode::Accumulator {
+            value = self.accumulator;
+            addr = 0;
+        } else {
+            addr = self.memory_lookup(addr_mode) as u16;
+            value = self.cpu_read_u8(addr);
+        }
+
         let c = if self.status_reg.carry { 1 } else { 0 };
         self.status_reg.carry = (value & (1 << 0)) != 0;
         let value = (value >> 1) | c << 7;
-        self.set_register(value, RegType::A);
+        self.status_reg.zero = value == 0;
+        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+
+        if addr_mode == AddressMode::Accumulator {
+            self.set_register(value, RegType::A);
+        } else {
+            self.cpu_write_u8(addr, value);
+        }
     }
 
-    fn rotate_left_to_a(&mut self, addr_mode: AddressMode) {
-        let value = self.load_u8_from_memory(addr_mode);
+    fn rotate_left(&mut self, addr_mode: AddressMode) {
+        let value:u8;
+        let addr:u16;
+        if addr_mode == AddressMode::Accumulator {
+            value = self.accumulator;
+            addr = 0;
+        } else {
+            addr = self.memory_lookup(addr_mode) as u16;
+            value = self.cpu_read_u8(addr);
+        }
+
         let c = if self.status_reg.carry { 1 } else { 0 };
         self.status_reg.carry = (value & (1 << 7)) != 0;
         let value = (value << 1) | c << 0;
-        self.set_register(value, RegType::A);
+        self.status_reg.zero = value == 0;
+        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+
+        if addr_mode == AddressMode::Accumulator {
+            self.set_register(value, RegType::A);
+        } else {
+            self.cpu_write_u8(addr, value);
+        }
     }
 
-    fn shift_right_to_a(&mut self, addr_mode: AddressMode) {
-        let value = self.load_u8_from_memory(addr_mode);
+    fn shift_right(&mut self, addr_mode: AddressMode) {
+        let value:u8;
+        let addr:u16;
+        if addr_mode == AddressMode::Accumulator {
+            value = self.accumulator;
+            addr = 0;
+        } else {
+            addr = self.memory_lookup(addr_mode) as u16;
+            value = self.cpu_read_u8(addr);
+        }
+
         self.status_reg.carry = (value & (1 << 0)) != 0;
         let value = value >> 1;
-        self.set_register(value, RegType::A);
+        self.status_reg.zero = value == 0;
+        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+
+        if addr_mode == AddressMode::Accumulator {
+            self.set_register(value, RegType::A);
+        } else {
+            self.cpu_write_u8(addr, value);
+        }
     }
 
-    fn shift_left_to_a(&mut self, addr_mode: AddressMode) { // ASL - zeropage
-        let value = self.load_u8_from_memory(addr_mode);
+    fn shift_left(&mut self, addr_mode: AddressMode) {
+        let value:u8;
+        let addr:u16;
+        if addr_mode == AddressMode::Accumulator {
+            value = self.accumulator;
+            addr = 0;
+        } else {
+            addr = self.memory_lookup(addr_mode) as u16;
+            value = self.cpu_read_u8(addr);
+        }
+
         self.status_reg.carry = (value & (1 << 7)) != 0;
         let value = ((value as u16) << 1) as u8;
-        self.set_register(value, RegType::A);
+        self.status_reg.zero = value == 0;
+        self.status_reg.negative_sign = (value & (1 << 7)) != 0;
+
+        if addr_mode == AddressMode::Accumulator {
+            self.set_register(value, RegType::A);
+        } else {
+            self.cpu_write_u8(addr, value);
+        }
     }
 
     fn bitwise_op_to_a<F>(&mut self, f: F, addr_mode: AddressMode)
@@ -1018,23 +1174,20 @@ impl CPU {
         let result = a + value + c;
         println!("ADC: A{:#X} + M{:#X} + C{:#X} = {:X}", a, value, c, result);
         self.status_reg.carry = result > 0xff;
-        self.status_reg.overflow = !(value & (1 << 7) != 0 ||
-                                     self.status_reg.negative_sign) &&
-                                     result >= 0x80;
+        self.status_reg.overflow = ((a^result)&(value^result)&0x80) != 0;
         self.set_register(result as u8, RegType::A);
     }
 
+    // impl as binary add with 1s compliment of the value being sub from A
     fn sub_with_carry(&mut self, addr_mode: AddressMode) {
-        let value = self.load_u8_from_memory(addr_mode) as i16;
-        let a = self.accumulator as i16;
-        let c = if self.status_reg.carry { 0 } else { 1 };
+        let value = self.load_u8_from_memory(addr_mode) as u16;
+        let a = self.accumulator as u16;
+        let c = if self.status_reg.carry { 1 } else { 0 };
 
-        let result = a - value - c;
-        println!("SBC: A{:#X} - M{:#X} - C{:#X} = {:#?}", a, value, c, result);
-        self.status_reg.carry = result >= 0;
-        self.status_reg.overflow = (value & (1 << 7) != 0 ||
-                                     self.status_reg.negative_sign) &&
-                                     (result as u8) < 0x80;
+        let result = a + (0xff - value) + c;
+        println!("SBC: A{:#X} + (0xff-M{:#X}) + C{:#X} = {:X}", a, value, c, result);
+        self.status_reg.carry = result > 0xff;
+        self.status_reg.overflow = ((a^result)&((0xff - value)^result)&0x80) != 0;
         self.set_register(result as u8, RegType::A);
     }
 
@@ -1192,8 +1345,8 @@ impl CPU {
             RegType::Y => (tmp.wrapping_add(self.index_y as u16)) as usize,
             _ => panic!("can not abs,A")
         };
-        println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X} = {:#X}",
-                  reg, tmp,self.index_x, self.index_y, result);
+//        println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X} = {:#X}",
+//                  reg, tmp,self.index_x, self.index_y, result);
 
         result
     }
@@ -1206,7 +1359,7 @@ impl CPU {
         let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
         let value:u16 = hi << 8 | lo;
         let result = value.wrapping_add(self.index_y as u16);
-        println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
+//        println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
         result as usize
     }
 
@@ -1217,7 +1370,7 @@ impl CPU {
             RegType::X => self.index_x as i16,
         };
         let value = self.load_u8_from_memory(addr_mode) as i16;
-        println!("CMY {:#X} - {:#X}", register, value);
+//        println!("CMY {:#X} - {:#X}", register, value);
         let result = (register - value) as u8;
         self.status_reg.zero = register == value;
         self.status_reg.negative_sign = (result & (1 << 7)) != 0;
@@ -1230,7 +1383,7 @@ impl CPU {
     fn branch(&mut self, condition: bool) {
         if condition {
             let value = self.load_u8_from_memory(AddressMode::Immediate) as i8;
-            println!("Branch: PC:{:#X} + {:}", self.program_counter, value);
+//            println!("Branch: PC:{:#X} + {:}", self.program_counter, value);
             let tmp = self.program_counter as i16;
             self.program_counter = (tmp + value as i16) as u16;
         } else {
@@ -1252,7 +1405,7 @@ impl CPU {
     fn push_stack (&mut self, value: u8) {
         let addr = 0x100 + self.stack_pointer as u16;
         self.cpu_write_u8(addr, value);
-        println!("stack wrote at 0x01{:x}: {:x}", self.stack_pointer, value);
+        //println!("stack wrote at 0x01{:x}: {:x}", self.stack_pointer, value);
         self.stack_pointer -= 1;
     }
 
@@ -1265,6 +1418,7 @@ impl CPU {
         match addr {
             RAM_START ... RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
+                //println!("Read {:#X} at {:#X} in RAM", self.bus.ram[addr as usize], addr);
                 self.bus.ram[addr as usize]
             }
 
@@ -1332,6 +1486,7 @@ impl CPU {
         match addr {
             RAM_START ... RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
+                println!("Wrote {:#X} at {:#X} in RAM", value, addr);
                 self.bus.ram[addr as usize] = value
             }
 
@@ -1340,7 +1495,8 @@ impl CPU {
             }
 
             APU_REGISTERS_START ... APU_REGISTERS_END => {
-                panic!("APU is unimplemented")
+                panic!("APU is unimplemented - 02 is: {:x} and 03 is {:x}",
+                        self.bus.ram[2], self.bus.ram[3])
             }
 
             EXPANSION_ROM_START ... EXPANSION_ROM_END => {

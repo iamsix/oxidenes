@@ -42,14 +42,14 @@ impl Cart {
         let read_pos = self.map_rom(addr);
         //println!("Read position {:#x}", read_pos)
         let value = self.rom[read_pos];
-        println!("Read byte: {:#x}", value);
+        //println!("Read byte: {:#x}", value);
         value
     }
 
     pub fn read_cart_u16(&self, addr: u16) -> u16 {
         let read_pos = self.map_rom(addr);
         let value = ((self.rom[read_pos + 1] as u16) << 8 | (self.rom[read_pos] as u16)) as u16;
-        println!("Read 2 bytes: {:#x}", value);
+        //println!("Read 2 bytes: {:#x}", value);
         value
     }
 
