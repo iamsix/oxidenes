@@ -3,6 +3,7 @@ use mem_map::*;
 // use std::collections::HashSet;
 
 // pub HashMap: ops;
+const PPU_MULTIPLIER:usize = 3;
 
 #[derive(Debug)]
 pub struct CPU {
@@ -81,8 +82,8 @@ impl CPU {
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 3 */
                       6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6, /* 4 */
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 5 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 7, 6, /* 6 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 6, 7, /* 7 */
+                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6, /* 6 */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 7 */
                       2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* 8 */
                       2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5, /* 9 */
                       2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* A */
@@ -93,10 +94,11 @@ impl CPU {
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7];// F
         //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
 
-        let mut counter = 0;
+        //let mut counter = 0;
         self.status_reg.break_flag = false;
         while !self.status_reg.break_flag {
             let instr = self.cpu_read_u8(self.program_counter);
+
             // TODO: Move this to a specific debug output
             let tmp: u8 = self.status_reg.into();
             println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
@@ -111,20 +113,18 @@ impl CPU {
                      self.cycle); //, self.status_reg);
 
             // if self.program_counter == 0xf327 {println!("Breaking line 80"); break;}
-            self.cycle = self.cycle + (timing[instr as usize] * 3);
-            if self.cycle > 341 {
+            self.execute_op(instr as u8);
+
+            self.cycle = self.cycle + (timing[instr as usize] * PPU_MULTIPLIER);
+            if self.cycle >= 341 {
                 self.cycle -= 341
             }
-            self.execute_op(instr as u8);
-            counter += 1;
         }
         // handle breaks here...
     }
 
     // TODO: Cycle counting for syncing.
     pub fn execute_op(&mut self, instr: u8) {
-
-
 
         self.program_counter += 1;
         match instr {
@@ -258,6 +258,7 @@ impl CPU {
                 self.set_register(value, RegType::A);
             }
 
+
             // LDX-immediate
             0xA2 => {
                 let value = self.load_u8_from_memory(AddressMode::Immediate);
@@ -287,6 +288,7 @@ impl CPU {
                 let value = self.load_u8_from_memory(AddressMode::ZeropageY);
                 self.set_register(value, RegType::X);
             }
+
 
             // LDY-immediate
             0xA0 => {
@@ -825,8 +827,9 @@ impl CPU {
 
             // TOP / NOP / SKW - Abs,X - undocumented opcode
             0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
-                //            println!("TOP abs,x - undocumented Opcode ${:X}", instr);
-                self.program_counter += 2;
+                // println!("TOP abs,x - undocumented Opcode ${:X}", instr);
+                // read the value and throw it away for cycle counting
+                let tmp = self.load_u8_from_memory(AddressMode::AbsoluteX);
             }
 
             // LAX - Ind,x - Undocumented Opcode
@@ -1025,48 +1028,68 @@ impl CPU {
                 let sr: u8 = self.status_reg.into();
                 self.push_stack(sr);
                 println!("Break");
+                let tmp = self.cpu_read_u16(IRQ_BRK_VECTOR_LOC);
+                self.program_counter = tmp;
             }
 
             _ => panic!("The opcode: {:#x} is unrecognized", instr),
         }
     }
 
+    // All of the XXX then YYY instructions are undocumented opcodes
+    // They usually have a hack for static cycle counts by resetting the cycle
+    // count at the end of both insturctions
+    // normally abs,x/y and ind,y have an extra cycle for page boundary
+    // but not on the undocumented ones for some reason
+
 
     fn ror_then_adc(&mut self, addr_mode: AddressMode) {
+        let tmp = self.cycle;
         self.rotate_right(addr_mode);
         self.reset_pc_for_double_op(addr_mode);
         self.add_with_carry(addr_mode);
+        self.cycle = tmp;
     }
 
     fn lsr_then_eor(&mut self, addr_mode: AddressMode) {
+        let tmp = self.cycle;
         self.shift_right(addr_mode);
         self.reset_pc_for_double_op(addr_mode);
         self.bitwise_op_to_a(|a, m| a ^ m, addr_mode);
+        self.cycle = tmp;
     }
 
     fn rol_then_and(&mut self, addr_mode: AddressMode) {
+        let tmp = self.cycle;
         self.rotate_left(addr_mode);
         self.reset_pc_for_double_op(addr_mode);
         self.bitwise_op_to_a(|a, m| a & m, addr_mode);
+        self.cycle = tmp;
     }
 
     fn asl_then_ora(&mut self, addr_mode: AddressMode) {
+        let tmp = self.cycle;
         self.shift_left(addr_mode);
         self.reset_pc_for_double_op(addr_mode);
         self.bitwise_op_to_a(|a, m| a | m, addr_mode);
+        self.cycle = tmp;
     }
 
     fn dec_then_cmp(&mut self, addr_mode: AddressMode) {
+        let tmp = self.cycle;
         self.decrement_memory(addr_mode);
         self.reset_pc_for_double_op(addr_mode);
         self.compare(RegType::A, addr_mode);
+        self.cycle = tmp;
     }
 
     // ISB
     fn inc_then_sbc(&mut self, addr_mode: AddressMode) {
+        let tmp = self.cycle;
         self.increment_memory(addr_mode);
         self.reset_pc_for_double_op(addr_mode);
         self.sub_with_carry(addr_mode);
+        self.cycle = tmp;
     }
 
     fn reset_pc_for_double_op(&mut self, addr_mode: AddressMode) {
@@ -1091,7 +1114,7 @@ impl CPU {
             value = self.accumulator;
             addr = 0;
         } else {
-            addr = self.memory_lookup(addr_mode) as u16;
+            addr = self.memory_lookup(addr_mode, false) as u16;
             value = self.cpu_read_u8(addr);
         }
 
@@ -1119,7 +1142,7 @@ impl CPU {
             value = self.accumulator;
             addr = 0;
         } else {
-            addr = self.memory_lookup(addr_mode) as u16;
+            addr = self.memory_lookup(addr_mode, false) as u16;
             value = self.cpu_read_u8(addr);
         }
 
@@ -1147,7 +1170,7 @@ impl CPU {
             value = self.accumulator;
             addr = 0;
         } else {
-            addr = self.memory_lookup(addr_mode) as u16;
+            addr = self.memory_lookup(addr_mode, false) as u16;
             value = self.cpu_read_u8(addr);
         }
 
@@ -1170,7 +1193,7 @@ impl CPU {
             value = self.accumulator;
             addr = 0;
         } else {
-            addr = self.memory_lookup(addr_mode) as u16;
+            addr = self.memory_lookup(addr_mode, false) as u16;
             value = self.cpu_read_u8(addr);
         }
 
@@ -1223,14 +1246,15 @@ impl CPU {
         };
 
         let result = a + (0xff - value) + c;
-        //        println!("SBC: A{:#X} + (0xff-M{:#X}) + C{:#X} = {:X}", a, value, c, result);
+        // TODO: debug
+        // println!("SBC: A{:#X} + (0xff-M{:#X}) + C{:#X} = {:X}", a, value, c, result);
         self.status_reg.carry = result > 0xff;
         self.status_reg.overflow = ((a ^ result) & ((0xff - value) ^ result) & 0x80) != 0;
         self.set_register(result as u8, RegType::A);
     }
 
     fn increment_memory(&mut self, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode) as u16;
+        let addr = self.memory_lookup(addr_mode, false) as u16;
         let mut value = self.cpu_read_u8(addr);
         value = value.wrapping_add(1);
         self.status_reg.zero = value == 0;
@@ -1239,166 +1263,12 @@ impl CPU {
     }
 
     fn decrement_memory(&mut self, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode) as u16;
+        let addr = self.memory_lookup(addr_mode, false) as u16;
         let mut value = self.cpu_read_u8(addr);
         value = value.wrapping_sub(1);
         self.status_reg.zero = value == 0;
         self.status_reg.negative_sign = (value & (1 << 7)) != 0;
         self.cpu_write_u8(addr, value);
-    }
-
-    fn memory_lookup(&mut self, addr_mode: AddressMode) -> usize {
-        match addr_mode {
-            AddressMode::Zeropage => {
-                let tmp = self.cpu_read_u8(self.program_counter);
-                self.program_counter += 1;
-                tmp as usize
-            }
-
-            AddressMode::ZeropageX => self.zeropage_xy(RegType::X),
-            AddressMode::Absolute => {
-                let tmp = self.cpu_read_u16(self.program_counter);
-                self.program_counter += 2;
-                tmp as usize
-            }
-            AddressMode::AbsoluteX => self.absolute_xy(RegType::X),
-            AddressMode::AbsoluteY => self.absolute_xy(RegType::Y),
-            AddressMode::XIndirect => self.x_indirect(),
-            AddressMode::IndirectY => self.indirect_y(),
-
-            _ => panic!("memory_lookup doesn't work on {:?}", addr_mode),
-        }
-    }
-
-    fn load_u8_from_memory(&mut self, addr_mode: AddressMode) -> u8 {
-        match addr_mode {
-            AddressMode::Accumulator => self.accumulator,
-            AddressMode::Immediate => {
-                self.program_counter += 1;
-                self.cpu_read_u8(self.program_counter - 1)
-            }
-
-            AddressMode::Zeropage => {
-                let tmp = self.cpu_read_u8(self.program_counter) as u16;
-                self.program_counter += 1;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::ZeropageX => {
-                let tmp = self.zeropage_xy(RegType::X) as u16;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::ZeropageY => {
-                let tmp = self.zeropage_xy(RegType::Y) as u16;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::Absolute => {
-                let tmp = self.cpu_read_u16(self.program_counter);
-                self.program_counter += 2;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::AbsoluteX => {
-                let tmp = self.absolute_xy(RegType::X) as u16;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::AbsoluteY => {
-                let tmp = self.absolute_xy(RegType::Y) as u16;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::XIndirect => {
-                let tmp = self.x_indirect() as u16;
-                self.cpu_read_u8(tmp)
-            }
-
-            AddressMode::IndirectY => {
-                let tmp = self.indirect_y() as u16;
-                self.cpu_read_u8(tmp)
-            }
-        }
-    }
-
-    fn store_u8_in_memory(&mut self, value: u8, addr_mode: AddressMode) {
-        let addr: u16 = match addr_mode {
-            AddressMode::Zeropage => {
-                let tmp = self.cpu_read_u8(self.program_counter) as u16;
-                self.program_counter += 1;
-                tmp
-            }
-
-            AddressMode::ZeropageX => self.zeropage_xy(RegType::X) as u16,
-
-            AddressMode::ZeropageY => self.zeropage_xy(RegType::Y) as u16,
-
-            AddressMode::Absolute => {
-                let tmp = self.cpu_read_u16(self.program_counter);
-                // println!("writing to {:#X}", tmp);
-                self.program_counter += 2;
-                tmp
-            }
-
-            AddressMode::AbsoluteX => self.absolute_xy(RegType::X) as u16,
-
-            AddressMode::AbsoluteY => self.absolute_xy(RegType::Y) as u16,
-
-            AddressMode::XIndirect => self.x_indirect() as u16,
-
-            AddressMode::IndirectY => self.indirect_y() as u16,
-
-            _ => panic!("It's not possible to write with {:?} mode", addr_mode),
-
-        };
-        self.cpu_write_u8(addr, value);
-    }
-
-    fn x_indirect(&mut self) -> usize {
-        let mut tmp = self.cpu_read_u8(self.program_counter);
-        self.program_counter += 1;
-        tmp = tmp.wrapping_add(self.index_x);
-        let lo = self.cpu_read_u8(tmp as u16) as usize;
-        let hi = self.cpu_read_u8((tmp.wrapping_add(1)) as u16) as usize;
-        hi << 8 | lo
-    }
-
-    fn zeropage_xy(&mut self, reg: RegType) -> usize {
-        let tmp = self.cpu_read_u8(self.program_counter);
-        self.program_counter += 1;
-        match reg {
-            RegType::X => tmp.wrapping_add(self.index_x) as usize,
-            RegType::Y => tmp.wrapping_add(self.index_y) as usize,
-            _ => panic!("can not zpg,A"),
-        }
-    }
-
-    // afaik I can ignore 'with carry' in the description because I'm using a u16
-    fn absolute_xy(&mut self, reg: RegType) -> usize {
-        let tmp = self.cpu_read_u16(self.program_counter);
-        self.program_counter += 2;
-        let result = match reg {
-            RegType::X => (tmp.wrapping_add(self.index_x as u16)) as usize,
-            RegType::Y => (tmp.wrapping_add(self.index_y as u16)) as usize,
-            _ => panic!("can not abs,A"),
-        };
-        //        println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X} = {:#X}",
-        //                  reg, tmp,self.index_x, self.index_y, result);
-
-        result
-    }
-
-    fn indirect_y(&mut self) -> usize {
-        let tmp = self.cpu_read_u8(self.program_counter);
-        self.program_counter += 1;
-        // ram read
-        let lo = self.cpu_read_u8(tmp as u16) as u16;
-        let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
-        let value: u16 = hi << 8 | lo;
-        let result = value.wrapping_add(self.index_y as u16);
-        //        println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
-        result as usize
     }
 
     fn compare(&mut self, reg: RegType, addr_mode: AddressMode) {
@@ -1420,16 +1290,121 @@ impl CPU {
     // maybe should be wrapping
     fn branch(&mut self, condition: bool) {
         if condition {
-            self.cycle += 1 * 3;
+            self.cycle += 1 * PPU_MULTIPLIER;
             let value = self.load_u8_from_memory(AddressMode::Immediate) as i8;
             //            println!("Branch: PC:{:#X} + {:}", self.program_counter, value);
             //let tmp = (self.program_counter as i16 + value as i16) as u16;
             let tmp = (self.program_counter as i16 + value as i16) as u16;
-            if tmp >> 8 != (self.program_counter + 1) >> 8 {self.cycle += 1 * 3;};
+            if tmp >> 8 != (self.program_counter + 1) >> 8 {
+                self.cycle += 1 * PPU_MULTIPLIER;
+            };
             self.program_counter = tmp as u16;
         } else {
             self.program_counter += 1;
         }
+    }
+
+    fn memory_lookup(&mut self, addr_mode: AddressMode, page_check: bool) -> u16 {
+        match addr_mode {
+            AddressMode::Immediate => {
+                self.program_counter += 1;
+                self.program_counter - 1
+            }
+            AddressMode::Zeropage => {
+                let tmp = self.cpu_read_u8(self.program_counter);
+                self.program_counter += 1;
+                tmp as u16
+            }
+
+            AddressMode::ZeropageX => self.zeropage_xy(RegType::X),
+            AddressMode::ZeropageY => self.zeropage_xy(RegType::Y),
+            AddressMode::Absolute => {
+                let tmp = self.cpu_read_u16(self.program_counter);
+                self.program_counter += 2;
+                tmp
+            }
+            AddressMode::AbsoluteX => self.absolute_xy(RegType::X, page_check),
+            AddressMode::AbsoluteY => self.absolute_xy(RegType::Y, page_check),
+            AddressMode::XIndirect => self.x_indirect(),
+            AddressMode::IndirectY => self.indirect_y(page_check),
+
+            _ => panic!("memory_lookup doesn't work on {:?}", addr_mode),
+        }
+    }
+
+    fn load_u8_from_memory(&mut self, addr_mode: AddressMode) -> u8 {
+        let mut page_check = false;
+        if addr_mode == AddressMode::AbsoluteX ||
+           addr_mode == AddressMode::AbsoluteY ||
+           addr_mode == AddressMode::IndirectY
+        {
+            page_check = true;
+        }
+        if addr_mode == AddressMode::Accumulator {
+            return self.accumulator
+        } else {
+            let addr = self.memory_lookup(addr_mode, page_check);
+            self.cpu_read_u8(addr)
+        }
+    }
+
+    fn store_u8_in_memory(&mut self, value: u8, addr_mode: AddressMode) {
+        let addr = self.memory_lookup(addr_mode, false);
+        self.cpu_write_u8(addr, value);
+    }
+
+    fn x_indirect(&mut self) -> u16 {
+        let mut tmp = self.cpu_read_u8(self.program_counter);
+        self.program_counter += 1;
+        tmp = tmp.wrapping_add(self.index_x);
+        let lo = self.cpu_read_u8(tmp as u16) as u16;
+        let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
+        hi << 8 | lo
+    }
+
+    fn zeropage_xy(&mut self, reg: RegType) -> u16 {
+        let tmp = self.cpu_read_u8(self.program_counter);
+        self.program_counter += 1;
+        match reg {
+            RegType::X => tmp.wrapping_add(self.index_x) as u16,
+            RegType::Y => tmp.wrapping_add(self.index_y) as u16,
+            _ => panic!("can not zpg,A"),
+        }
+    }
+
+    // afaik I can ignore 'with carry' in the description because I'm using a u16
+    // I'm assuming the addr would wrap here.. no idea
+    fn absolute_xy(&mut self, reg: RegType, page_check: bool) -> u16 {
+        let tmp = self.cpu_read_u16(self.program_counter);
+        self.program_counter += 2;
+        let result = match reg {
+            RegType::X => tmp.wrapping_add(self.index_x as u16),
+            RegType::Y => tmp.wrapping_add(self.index_y as u16),
+            _ => panic!("can not abs,A"),
+        };
+
+         if page_check && (tmp >> 8 != result >> 8) {
+                self.cycle += 1 * PPU_MULTIPLIER;
+         }
+        // TODO: Debugger
+        // println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X} = {:#X}",
+        //          reg, tmp,self.index_x, self.index_y, result);
+        result
+    }
+
+    fn indirect_y(&mut self, page_check: bool) -> u16 {
+        let tmp = self.cpu_read_u8(self.program_counter); // zpg addr
+        self.program_counter += 1;
+        let lo = self.cpu_read_u8(tmp as u16) as u16;
+        let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
+        let value: u16 = hi << 8 | lo;
+        let result = value.wrapping_add(self.index_y as u16);
+        if page_check && (hi != result >> 8) {
+            self.cycle += 1 * PPU_MULTIPLIER;
+        }
+        result
+        // TODO:: debugger
+        // println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
     }
 
     // setting the accumulator always sets N and Z appropriately
