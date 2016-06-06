@@ -3,7 +3,7 @@ use mem_map::*;
 // use std::collections::HashSet;
 
 // pub HashMap: ops;
-const PPU_MULTIPLIER:usize = 3;
+
 
 #[derive(Debug)]
 pub struct CPU {
@@ -18,7 +18,7 @@ pub struct CPU {
     program_counter: u16, // PC - should be PCHI/PCLO but easier this way
     stack_pointer: u8, // S or SP
 
-    bus: Bus,
+    pub bus: Bus,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +54,33 @@ enum AddressMode {
     ZeropageY,
 }
 
+pub enum RunCondition {
+    BreakInstr,
+    Step,
+    ToPc(u16),
+    NextScanline,
+}
+
+const PPU_MULTIPLIER:usize = 3;
+        //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+const timing: [usize;256] = [
+                      7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, /* 0 */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 1 */
+                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, /* 2 */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 3 */
+                      6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6, /* 4 */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 5 */
+                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6, /* 6 */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 7 */
+                      2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* 8 */
+                      2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5, /* 9 */
+                      2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* A */
+                      2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4, /* B */
+                      2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* C */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* D */
+                      2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* E */
+                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7];/* F */
+        //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
 
 impl CPU {
     pub fn new(bus: Bus, pc: u16) -> CPU {
@@ -73,31 +100,16 @@ impl CPU {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, cond: RunCondition) {
 
-        //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-        let timing = [7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, /* 0 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 1 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, /* 2 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 3 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6, /* 4 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 5 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6, /* 6 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 7 */
-                      2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* 8 */
-                      2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5, /* 9 */
-                      2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* A */
-                      2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4, /* B */
-                      2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* C */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* D */
-                      2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* E */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7];// F
-        //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+
 
         //let mut counter = 0;
         self.status_reg.break_flag = false;
         while !self.status_reg.break_flag {
-            let instr = self.cpu_read_u8(self.program_counter);
+            let pc = self.program_counter;
+            let instr = self.cpu_read_u8(pc);
+
 
             // TODO: Move this to a specific debug output
             let tmp: u8 = self.status_reg.into();
@@ -112,18 +124,35 @@ impl CPU {
                      self.stack_pointer,
                      self.cycle); //, self.status_reg);
 
+
             // if self.program_counter == 0xf327 {println!("Breaking line 80"); break;}
             self.execute_op(instr as u8);
 
             self.cycle = self.cycle + (timing[instr as usize] * PPU_MULTIPLIER);
-            if self.cycle >= 341 {
-                self.cycle -= 341
+
+            match cond {
+                RunCondition::BreakInstr => {},
+                RunCondition::Step => break,
+                RunCondition::ToPc(pc) => {
+                    if self.program_counter == pc {
+                        println!("PC reached");
+                        break;
+                    }
+                }
+
+                RunCondition::NextScanline => {
+                    if self.cycle >= 341 {
+                        self.cycle -= 341;
+                        break;
+                    }
+                }
+
             }
+
         }
-        // handle breaks here...
     }
 
-    // TODO: Cycle counting for syncing.
+
     pub fn execute_op(&mut self, instr: u8) {
 
         self.program_counter += 1;
@@ -137,8 +166,9 @@ impl CPU {
 
             0x6C => {
                 // JMP-indirect
-                let lotmp = self.cpu_read_u8(self.program_counter);
-                let hitmp = self.cpu_read_u8(self.program_counter + 1);
+                let pc = self.program_counter;
+                let lotmp = self.cpu_read_u8(pc);
+                let hitmp = self.cpu_read_u8(pc + 1);
                 // because there is no carry the lo byte of effective addr wraps +1
                 // see http://www.6502.org/tutorials/6502opcodes.html under JMP
 
@@ -829,7 +859,7 @@ impl CPU {
             0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
                 // println!("TOP abs,x - undocumented Opcode ${:X}", instr);
                 // read the value and throw it away for cycle counting
-                let tmp = self.load_u8_from_memory(AddressMode::AbsoluteX);
+                self.load_u8_from_memory(AddressMode::AbsoluteX);
             }
 
             // LAX - Ind,x - Undocumented Opcode
@@ -1311,7 +1341,8 @@ impl CPU {
                 self.program_counter - 1
             }
             AddressMode::Zeropage => {
-                let tmp = self.cpu_read_u8(self.program_counter);
+                let pc = self.program_counter;
+                let tmp = self.cpu_read_u8(pc);
                 self.program_counter += 1;
                 tmp as u16
             }
@@ -1354,7 +1385,8 @@ impl CPU {
     }
 
     fn x_indirect(&mut self) -> u16 {
-        let mut tmp = self.cpu_read_u8(self.program_counter);
+        let pc = self.program_counter;
+        let mut tmp = self.cpu_read_u8(pc);
         self.program_counter += 1;
         tmp = tmp.wrapping_add(self.index_x);
         let lo = self.cpu_read_u8(tmp as u16) as u16;
@@ -1363,7 +1395,8 @@ impl CPU {
     }
 
     fn zeropage_xy(&mut self, reg: RegType) -> u16 {
-        let tmp = self.cpu_read_u8(self.program_counter);
+        let pc = self.program_counter;
+        let tmp = self.cpu_read_u8(pc);
         self.program_counter += 1;
         match reg {
             RegType::X => tmp.wrapping_add(self.index_x) as u16,
@@ -1393,7 +1426,8 @@ impl CPU {
     }
 
     fn indirect_y(&mut self, page_check: bool) -> u16 {
-        let tmp = self.cpu_read_u8(self.program_counter); // zpg addr
+        let pc = self.program_counter;
+        let tmp = self.cpu_read_u8(pc); // zpg addr
         self.program_counter += 1;
         let lo = self.cpu_read_u8(tmp as u16) as u16;
         let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
@@ -1427,10 +1461,12 @@ impl CPU {
 
     fn pull_stack(&mut self) -> u8 {
         self.stack_pointer += 1;
-        self.cpu_read_u8(0x100 + self.stack_pointer as u16)
+        let tmp = 0x100 + self.stack_pointer as u16;
+        self.cpu_read_u8(tmp)
     }
 
-    fn cpu_read_u8(&self, addr: u16) -> u8 {
+    fn cpu_read_u8(&mut self, addr: u16) -> u8 {
+        // println!("Read {:#X}", addr);
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
@@ -1438,7 +1474,9 @@ impl CPU {
                 self.bus.ram[addr as usize]
             }
 
-            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
+            PPUSTATUS => self.bus.ppu.read_ppustatus(),
+
+//            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
 
             APU_REGISTERS_START...APU_REGISTERS_END => panic!("APU is unimplemented"),
 
@@ -1457,6 +1495,7 @@ impl CPU {
 
     // The actual 6502 can't read a u16, this is for convenince only
     fn cpu_read_u16(&self, addr: u16) -> u16 {
+        // println!("Read {:#X}", addr);
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
@@ -1465,9 +1504,7 @@ impl CPU {
                 hi << 8 | lo
             }
 
-            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
-
-            APU_REGISTERS_START...APU_REGISTERS_END => panic!("APU is unimplemented"),
+            // PPUSTATUS => self.bus.ppu.read_ppustatus(),
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored
@@ -1483,6 +1520,7 @@ impl CPU {
     }
 
     fn cpu_write_u8(&mut self, addr: u16, value: u8) {
+
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
@@ -1490,7 +1528,10 @@ impl CPU {
                 self.bus.ram[addr as usize] = value
             }
 
-            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
+//            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
+
+            PPUCTRL => self.bus.ppu.write_ppuctrl(value),
+            PPUMASK => self.bus.ppu.write_ppumask(value),
 
             APU_REGISTERS_START...APU_REGISTERS_END => {
                 self.bus.apu.write(addr, value);
@@ -1505,7 +1546,7 @@ impl CPU {
 
             PRG_ROM_START...PRG_ROM_END => panic!("Can't write to PRG rom location"),
 
-            _ => panic!("Invalid write location {:#X}", addr),
+            _ => {panic!("Invalid write location {:#X}", addr);},
         }
     }
 
