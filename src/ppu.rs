@@ -1,6 +1,6 @@
 
 
-//use cart;
+use cart;
 
 pub struct PPU {
     // PPUCTRL $2000
@@ -27,6 +27,7 @@ pub struct PPU {
     sprite0_hit: bool,
     vblank: bool,
 
+    ppu_addr: u16,
     oam_addr: u8,
 
     oam: Box<[u8]>,
@@ -35,16 +36,22 @@ pub struct PPU {
     scroll_y: u8,
     vram_addr: u16,
     t_vram_addr: u16,
-    scroll_w: bool,
+    w_toggle: bool,
 
+    pub scanline: i16,
 
+    palette: Box<[u8]>,
     vram: Box<[u8]>,
-    chr_ram: Box<[u8]>,
+    chr: cart::ChrRom,
+
+    lastwrite: u8,
+    initial_reset: bool,
 }
 
 impl PPU {
-    pub fn new() -> PPU {
+    pub fn new(chr: cart::ChrRom) -> PPU {
         PPU {
+            // PPUCTRL $2000
             base_nametable: 0x2000,
             vram_increment: false,
             sprite_table_high: false,
@@ -53,7 +60,7 @@ impl PPU {
             ppu_master: false,
             nmi_enable: false,
 
-            // PPUMASK #2001
+            // PPUMASK $2001
             grayscale: false,
             bg_left_8px: false,
             sprite_left_8px: false,
@@ -64,10 +71,11 @@ impl PPU {
             emphasize_blue: false,
 
             // PPUSTATUS $2002
-            sprite_overflow: true,
+            sprite_overflow: false,
             sprite0_hit: false,
-            vblank: true,
+            vblank: false,
 
+            ppu_addr: 0,
             oam_addr: 0,
 
             oam: vec![0; 256].into_boxed_slice(),
@@ -76,14 +84,25 @@ impl PPU {
             scroll_y: 0,
             vram_addr: 0,
             t_vram_addr: 0,
-            scroll_w: false,
+            w_toggle: false,
 
-            vram: vec![0; 1024 * 2].into_boxed_slice(),
-            chr_ram: vec![0; 0].into_boxed_slice(),
+            scanline: 241,
+
+            palette: vec![0; 32].into_boxed_slice(),
+            // TODO: mappers!
+            // research if we can just give it 4kb all the time
+            // then logic out the extra RAM
+            vram: vec![0; 1024 * 4].into_boxed_slice(),
+            chr: chr,
+
+            lastwrite: 0,
+            initial_reset: true,
         }
     }
 
     pub fn write_ppuctrl(&mut self, data: u8){
+        self.lastwrite = data;
+        println!("Write PPUCTRL {:#b}", data);
         self.base_nametable = match data & 3 {
             0 => 0x2000,
             1 => 0x2400,
@@ -101,6 +120,8 @@ impl PPU {
     }
 
     pub fn write_ppumask(&mut self, data: u8){
+        self.lastwrite = data;
+        println!("Write PPUMASK {:#b}", data);
         self.grayscale = (data & (1 << 0)) != 0;
         self.bg_left_8px = (data & (1 << 1)) != 0;
         self.sprite_left_8px = (data & (1 << 2)) != 0;
@@ -123,21 +144,159 @@ impl PPU {
             value |= 1 << 7;
             self.vblank = false;
         }
-        self.scroll_w = false;
-        value
+        self.w_toggle = false;
+        value | (self.lastwrite & 0b11111)
+    }
+
+    pub fn write_oamaddr(&mut self, data: u8) {
+        self.lastwrite = data;
+        self.oam_addr = data;
+        println!("OAMADDR set: {:#X}", data);
+    }
+
+    pub fn write_oamdata(&mut self, data: u8) {
+        self.lastwrite = data;
+        self.oam[self.oam_addr as usize] = data;
+        self.oam_addr = self.oam_addr.wrapping_add(1);
     }
 
     pub fn write_ppuscroll(&mut self, data: u8) {
-        if !self.scroll_w {
+        self.lastwrite = data;
+        if !self.w_toggle {
             self.scroll_x = data;
         } else {
             self.scroll_y = data;
         }
-        self.scroll_w = !self.scroll_w;
+        self.w_toggle = !self.w_toggle;
+        println!("PPUSCROLL set X: {:#x} Y {:#X}", self.scroll_x, self.scroll_y);
     }
 
-    pub fn render_scanline(&mut self) {
-        //super::cpu_read_u8(0xc000)
+    pub fn write_ppuaddr(&mut self, data: u8) {
+        self.lastwrite = data;
+        if !self.w_toggle {
+            self.ppu_addr = (data as u16) << 8;
+
+        } else {
+            self.ppu_addr |= data as u16;
+        }
+        println!("PPUADDR set: {:#X}", self.ppu_addr);
+        self.w_toggle = !self.w_toggle;
+    }
+
+    // TODO - mappers - CHRROM etc.
+    pub fn write_ppudata(&mut self, data:u8) {
+        self.lastwrite = data;
+        println!("PPUDATA virtual addr {:#X}", self.ppu_addr);
+        match self.ppu_addr {
+            0x0000...0x1FFF => panic!("CHR RAM not done yet"),
+            0x2000...0x2FFF => {
+                let mut offset:u16 = 0;
+                if self.chr.vertical_mirroring && self.ppu_addr >= 0x2800 {
+                    offset = 0x800;
+                } else if self.chr.horizontal_mirroring &&
+                    (self.ppu_addr >= 0x2400 && self.ppu_addr < 0x2800) ||
+                    (self.ppu_addr >= 0x2C00 && self.ppu_addr < 0x3000)
+                {
+                    offset = 0x400;
+                }
+
+                let realaddr = (self.ppu_addr - 0x2000) - offset;
+                self.vram[realaddr as usize] = data;
+                println!("Writing RAM {:#X} at {:#X}", data, realaddr);
+            }
+            0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
+            0x3F00...0x3FFF => {
+                let realaddr = (self.ppu_addr - 0x3F00) % 0x20;
+                println!("Writing palette data {:#x} at {:#x}", data, realaddr);
+                self.palette[realaddr as usize] = data;
+            }
+            _ => panic!("need mirrors of all vram")
+        }
+        if !self.vram_increment {
+            self.ppu_addr += 1;
+        } else {
+            // not sure of this...
+            self.ppu_addr += 32;
+        }
+    }
+
+    pub fn read_ppudata(&mut self) -> u8 {
+        let data = match self.ppu_addr {
+            0x0000...0x1FFF => self.chr.read_u8(self.ppu_addr),
+            0x2000...0x2FFF => {
+                let mut offset:u16 = 0;
+                if self.chr.vertical_mirroring && self.ppu_addr >= 0x2800 {
+                    offset = 0x800;
+                } else if self.chr.horizontal_mirroring &&
+                    (self.ppu_addr >= 0x2400 && self.ppu_addr < 0x2800) ||
+                    (self.ppu_addr >= 0x2C00 && self.ppu_addr < 0x3000)
+                {
+                    offset = 0x400;
+                }
+
+                let realaddr = (self.ppu_addr - 0x2000) - offset;
+                self.vram[realaddr as usize]
+            }
+            0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
+            0x3F00...0x3FFF => {
+                let realaddr = (self.ppu_addr - 0x3F00) % 0x20;
+                self.palette[realaddr as usize]
+            }
+            _ => panic!("need mirrors of all vram")
+
+        };
+
+        println!("Read PPUDATA {:#X} from {:#X}", data, self.ppu_addr);
+
+        if !self.vram_increment {
+            self.ppu_addr += 1;
+        } else {
+            // not sure of this...
+            self.ppu_addr += 32;
+        }
+
+        data
+    }
+
+//    $0000-$0FFF 	$1000 	Pattern table 0
+//    $1000-$1FFF 	$1000 	Pattern Table 1
+//    $2000-$23FF 	$0400 	Nametable 0
+//    $2400-$27FF 	$0400 	Nametable 1
+//    $2800-$2BFF 	$0400 	Nametable 2
+//    $2C00-$2FFF 	$0400 	Nametable 3
+//    $3F00-$3F1F 	$0020 	Palette RAM indexes
+//    $3F30-$3FFFF    Mirrors Pallete RAM - MUST BE EMULATED
+
+// nametables contain offsets referring to patterns..
+
+    pub fn render_scanline(&mut self) -> bool {
+        if self.scanline == -1 {
+            self.vblank  = false;
+            self.sprite0_hit = false;
+        }
+        if self.scanline >= 0 && self.scanline < 240 {
+            // Do rendering here.
+        }
+
+        // if self.scanline == 240 {};
+
+        self.scanline += 1;
+
+        if self.scanline == 241 && !self.initial_reset {
+            self.vblank = true;
+        }
+
+        if self.scanline > 260 {
+            self.scanline = -1;
+            if self.initial_reset {self.initial_reset = false};
+        }
+
+        if self.vblank && self.nmi_enable {
+            return true;
+        }
+
+        false
+        //println!("Read from CHR read byte {:#x} ", self.chr.read_u8(0));
     }
 
 }

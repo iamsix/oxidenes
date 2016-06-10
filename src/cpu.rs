@@ -7,16 +7,16 @@ use mem_map::*;
 
 #[derive(Debug)]
 pub struct CPU {
-    cycle: usize,
+    pub cycle: isize,
 
-    accumulator: u8, // A
+    pub accumulator: u8, // A
 
-    index_x: u8, // X
-    index_y: u8, // Y
+    pub index_x: u8, // X
+    pub index_y: u8, // Y
 
-    status_reg: StatusReg, // P
-    program_counter: u16, // PC - should be PCHI/PCLO but easier this way
-    stack_pointer: u8, // S or SP
+    pub status_reg: StatusReg, // P
+    pub program_counter: u16, // PC - should be PCHI/PCLO but easier this way
+    pub stack_pointer: u8, // S or SP
 
     pub bus: Bus,
 }
@@ -54,16 +54,19 @@ enum AddressMode {
     ZeropageY,
 }
 
+/*
+#[derive(PartialEq)]
 pub enum RunCondition {
     BreakInstr,
     Step,
     ToPc(u16),
     NextScanline,
 }
+*/
 
-const PPU_MULTIPLIER:usize = 3;
+pub const PPU_MULTIPLIER:isize = 3;
         //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-const timing: [usize;256] = [
+pub const timing: [isize;256] = [
                       7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, /* 0 */
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 1 */
                       6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, /* 2 */
@@ -99,57 +102,51 @@ impl CPU {
             bus: bus,
         }
     }
+/*
+    pub fn read_instr(&mut self) -> u8 {
+        let pc = self.program_counter;
+        let instr = self.cpu_read_u8(pc);
 
-    pub fn run(&mut self, cond: RunCondition) {
-
-
-
-        //let mut counter = 0;
-        self.status_reg.break_flag = false;
-        while !self.status_reg.break_flag {
-            let pc = self.program_counter;
-            let instr = self.cpu_read_u8(pc);
-
-
-            // TODO: Move this to a specific debug output
-            let tmp: u8 = self.status_reg.into();
-            println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
-                      SP:{:02X} CYC:{:>3} ",
-                     self.program_counter,
-                     instr,
-                     self.accumulator,
-                     self.index_x,
-                     self.index_y,
-                     tmp,
-                     self.stack_pointer,
-                     self.cycle); //, self.status_reg);
-
-
-            // if self.program_counter == 0xf327 {println!("Breaking line 80"); break;}
-            self.execute_op(instr as u8);
-
-            self.cycle = self.cycle + (timing[instr as usize] * PPU_MULTIPLIER);
-
-            match cond {
-                RunCondition::BreakInstr => {},
-                RunCondition::Step => break,
-                RunCondition::ToPc(pc) => {
-                    if self.program_counter == pc {
-                        println!("PC reached");
-                        break;
-                    }
-                }
-
-                RunCondition::NextScanline => {
-                    if self.cycle >= 341 {
-                        self.cycle -= 341;
-                        break;
-                    }
-                }
-
-            }
-
+        // TODO: Move this to a specific debug output
+        let tmp: u8 = self.status_reg.into();
+        let mut tmpscanline = self.bus.ppu.scanline;
+        let mut tmpcycle = self.cycle;
+        if tmpcycle >= 341 {
+            tmpcycle %= 341;
+            tmpscanline += 1;
         }
+        println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
+                  SP:{:02X} CYC:{:>3} SL:{:}",
+                 self.program_counter,
+                 instr,
+                 self.accumulator,
+                 self.index_x,
+                 self.index_y,
+                 tmp,
+                 self.stack_pointer,
+                 tmpcycle,
+                 tmpscanline,
+                 ); //, self.status_reg);
+
+
+        self.cycle = self.cycle + (timing[instr as usize] * PPU_MULTIPLIER);
+
+        instr
+    }
+*/
+
+    pub fn nmi (&mut self){
+        let hi = (self.program_counter >> 8) as u8;
+        self.push_stack(hi);
+        let lo = (0x00ff & self.program_counter) as u8;
+        self.push_stack(lo);
+        let sr: u8 = self.status_reg.into();
+        self.push_stack(sr);
+        println!("NMI");
+        let tmp = self.cpu_read_u16(NMI_VECTOR_LOC);
+        self.program_counter = tmp;
+        // need to add some cycles here..
+        self.cycle += 7  * PPU_MULTIPLIER;
     }
 
 
@@ -1465,7 +1462,7 @@ impl CPU {
         self.cpu_read_u8(tmp)
     }
 
-    fn cpu_read_u8(&mut self, addr: u16) -> u8 {
+    pub fn cpu_read_u8(&mut self, addr: u16) -> u8 {
         // println!("Read {:#X}", addr);
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
@@ -1475,10 +1472,11 @@ impl CPU {
             }
 
             PPUSTATUS => self.bus.ppu.read_ppustatus(),
+            PPUDATA => self.bus.ppu.read_ppudata(),
 
-//            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
-
-            APU_REGISTERS_START...APU_REGISTERS_END => panic!("APU is unimplemented"),
+            // TODO: implement joysticks
+            JOY1 => 0,
+            JOY2 => 0,
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored
@@ -1504,7 +1502,6 @@ impl CPU {
                 hi << 8 | lo
             }
 
-            // PPUSTATUS => self.bus.ppu.read_ppustatus(),
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored
@@ -1515,7 +1512,7 @@ impl CPU {
 
             PRG_ROM_START...PRG_ROM_END => self.bus.cart.read_cart_u16(addr),
 
-            _ => panic!("Invalid read location {:#X}", addr),
+            _ => panic!("Invalid u16 read location {:#X}", addr),
         }
     }
 
@@ -1524,18 +1521,41 @@ impl CPU {
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
-                //                println!("Wrote {:#X} at {:#X} in RAM", value, addr);
+                println!("Wrote {:#X} at {:#X} in RAM", value, addr);
                 self.bus.ram[addr as usize] = value
             }
 
 //            PPU_REGISTERS_START...PPU_REGISTERS_VIRTUAL_END => panic!("PPU is unimplemented"),
 
+
             PPUCTRL => self.bus.ppu.write_ppuctrl(value),
             PPUMASK => self.bus.ppu.write_ppumask(value),
+            OAMADDR => self.bus.ppu.write_oamaddr(value),
+            OAMDATA => self.bus.ppu.write_oamdata(value),
+            PPUSCROLL => self.bus.ppu.write_ppuscroll(value),
+            PPUADDR => self.bus.ppu.write_ppuaddr(value),
+            PPUDATA => self.bus.ppu.write_ppudata(value),
 
-            APU_REGISTERS_START...APU_REGISTERS_END => {
+            APU_REGISTERS_START...APU_REGISTERS_END | SND_CHN => {
                 self.bus.apu.write(addr, value);
             }
+
+            OAMDMA => {
+                println!("OAMDMA at {:#X}", value);
+                for i in 0..0xFF {
+                    let ramaddr:usize = (value as usize) << 8 | i;
+                    let data = self.bus.ram[ramaddr];
+                    self.bus.ppu.write_oamdata(data);
+                }
+                let mut cycles = 513;
+                if self.cycle % 2 == 1 {
+                    cycles += 1;
+                }
+                self.cycle += cycles * PPU_MULTIPLIER;
+                self.bus.ppu.scanline += 4;
+            }
+
+            JOY1 => println!("Strobe Controllers {:#X}", value),
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored
@@ -1544,7 +1564,7 @@ impl CPU {
 
             SRAM_START...SRAM_END => panic!("SRAM is unimplemented"),
 
-            PRG_ROM_START...PRG_ROM_END => panic!("Can't write to PRG rom location"),
+            PRG_ROM_START...PRG_ROM_END => panic!("Mappers are unimplemented"),
 
             _ => {panic!("Invalid write location {:#X}", addr);},
         }

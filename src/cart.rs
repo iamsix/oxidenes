@@ -3,6 +3,48 @@ use std::fs::File;
 use std::io::Read;
 
 use mem_map::*;
+const INES_OFFSET: u16 = 0x10;
+
+pub struct ChrRom {
+    rom: Box<[u8]>,
+
+    prg_rom_banks: u8,
+    chr_rom_banks: u8,
+    pub horizontal_mirroring: bool,
+    pub vertical_mirroring: bool,
+    pub four_screen_vram: bool,
+
+    mapper: u8,
+}
+
+// TODO: separate rom_file reads to read only the relevant parts
+impl ChrRom {
+    pub fn new() -> ChrRom {
+        let romfile = read_rom_file();
+        ChrRom {
+            prg_rom_banks: romfile[4],
+            chr_rom_banks: romfile[5],
+
+            horizontal_mirroring: romfile[6] & (1 << 0) == 0,
+            vertical_mirroring: romfile[6] & (1 << 0) != 0,
+            four_screen_vram: romfile[6] & (2 << 3) != 0,
+            //           prg_ram_present: false,
+            //           trainer: false,
+            mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
+
+            rom: romfile,
+        }
+
+    }
+
+    pub fn read_u8(&self, addr: u16) -> u8 {
+        // TODO: MAPPERS!
+        let offset = INES_OFFSET as usize + 1024 * 16 * self.prg_rom_banks as usize;
+        self.rom[offset + addr as usize]
+    }
+
+}
+
 
 pub struct Cart {
     rom: Box<[u8]>,
@@ -54,7 +96,7 @@ impl Cart {
     }
 
     fn map_rom(&self, addr: u16) -> usize {
-        const INES_OFFSET: u16 = 0x10;
+
         //        println!("Read Address: {:#x}", addr);
 
         let read_pos: usize;
@@ -81,7 +123,7 @@ impl Cart {
 
 // TODO: Read rom file path from args
 fn read_rom_file() -> Box<[u8]> {
-    let mut rom_file = File::open("nestest.nes").unwrap();
+    let mut rom_file = File::open("smb.nes").unwrap();
     let mut rom_buffer = Vec::new();
     rom_file.read_to_end(&mut rom_buffer).unwrap();
     rom_buffer.into_boxed_slice()

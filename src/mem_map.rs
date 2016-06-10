@@ -7,8 +7,8 @@ const _STACK_LEN: u8 = 0xff;
 
 pub const RAM_START: u16 = 0x0000;
 pub const RAM_LEN: u16 = 0x800;
-pub const RAM_VIRTUAL_END: u16 = 0x1999;
-// do a  mod 0x800 to mirror 0x800 through 0x1999
+pub const RAM_VIRTUAL_END: u16 = 0x1FFF;
+// do a  mod 0x800 to mirror 0x800 through 0x1FFF
 
 /*pub const PPU_REGISTERS_START: u16 = 0x2000;
 const _PPU_REGISTERS_LEN: usize = 0x8;
@@ -27,8 +27,12 @@ pub const PPUDATA:u16 = 0x2007;
 pub const OAMDMA:u16 = 0x4014;
 
 pub const APU_REGISTERS_START: u16 = 0x4000;
-pub const APU_REGISTERS_END: u16 = 0x401F;
+pub const APU_REGISTERS_END: u16 = 0x4013;
+pub const SND_CHN: u16 = 0x4015;
 // http://wiki.nesdev.com/w/index.php/2A03
+
+pub const JOY1: u16 = 0x4016;
+pub const JOY2: u16 = 0x4017;
 
 pub const EXPANSION_ROM_START: u16 = 0x4020;
 pub const EXPANSION_ROM_END: u16 = 0x5FFF;
