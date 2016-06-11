@@ -270,6 +270,8 @@ impl PPU {
 // nametables contain offsets referring to patterns..
 
     pub fn render_scanline(&mut self) -> bool {
+
+        // println!("Before: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
         if self.scanline == -1 {
             self.vblank  = false;
             self.sprite0_hit = false;
@@ -291,6 +293,7 @@ impl PPU {
             if self.initial_reset {self.initial_reset = false};
         }
 
+        println!("After: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
         if self.vblank && self.nmi_enable {
             return true;
         }

@@ -36,25 +36,11 @@ fn main() {
     let mut cpu = cpu::CPU::new(cpubus, pc as u16);
     println!("{:#?}", cpu);
 
+    let mut nmi = false;
     loop {
 
         let mut pc = cpu.program_counter;
         let mut instr = cpu.cpu_read_u8(pc);
-
-        let mut nmi = false;
-        if cpu.cycle >= 341 {
-            cpu.cycle %= 341;
-            nmi = cpu.bus.ppu.render_scanline();
-            if cpu.cycle > 2 && nmi {
-                cpu.nmi();
-                // because of the NMI our instr is wrong
-                pc = cpu.program_counter;
-                instr = cpu.cpu_read_u8(pc);
-                nmi = false;
-            }
-        }
-
-
         // TODO: Move this to a specific debug output
         let tmp: u8 = cpu.status_reg.into();
         println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
@@ -66,23 +52,29 @@ fn main() {
                  cpu.index_y,
                  tmp,
                  cpu.stack_pointer,
-                 cpu.cycle,
+                 cpu.cycle % 341,
                  cpu.bus.ppu.scanline,
                  ); //, self.status_reg);
 
 
-        cpu.execute_op(instr);
         cpu.cycle = cpu.cycle + (cpu::timing[instr as usize] * cpu::PPU_MULTIPLIER);
+
+        if cpu.cycle >= 341 {
+            // println!("Cycles {:}", cpu.cycle);
+            cpu.cycle %= 341;
+            nmi = cpu.bus.ppu.render_scanline();
+        }
+
+    // loop here until the ticks would be 341?
+        cpu.execute_op(instr);
+        if nmi && cpu.cycle > 2 {
+            cpu.nmi();
+            nmi = false;
+        }
+
         //if cpu.cycle >= 341 {
         //    cpu.cycle %= 341;
         //}
-        if nmi {
-                cpu.nmi();
-                // because of the NMI our instr is wrong
-        //        pc = cpu.program_counter;
-        //        instr = cpu.cpu_read_u8(pc);
-        }
-
 
   //if cpu.program_counter == 0x8057 {break;}
 
