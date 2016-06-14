@@ -54,19 +54,10 @@ enum AddressMode {
     ZeropageY,
 }
 
-/*
-#[derive(PartialEq)]
-pub enum RunCondition {
-    BreakInstr,
-    Step,
-    ToPc(u16),
-    NextScanline,
-}
-*/
 
 pub const PPU_MULTIPLIER:isize = 3;
-        //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-pub const timing: [isize;256] = [
+pub const TIMING: [isize;256] = [
+        /*            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F       */
                       7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, /* 0 */
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 1 */
                       6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, /* 2 */
@@ -83,7 +74,7 @@ pub const timing: [isize;256] = [
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* D */
                       2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* E */
                       2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7];/* F */
-        //            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+        /*            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F       */
 
 impl CPU {
     pub fn new(bus: Bus, pc: u16) -> CPU {
@@ -102,38 +93,6 @@ impl CPU {
             bus: bus,
         }
     }
-/*
-    pub fn read_instr(&mut self) -> u8 {
-        let pc = self.program_counter;
-        let instr = self.cpu_read_u8(pc);
-
-        // TODO: Move this to a specific debug output
-        let tmp: u8 = self.status_reg.into();
-        let mut tmpscanline = self.bus.ppu.scanline;
-        let mut tmpcycle = self.cycle;
-        if tmpcycle >= 341 {
-            tmpcycle %= 341;
-            tmpscanline += 1;
-        }
-        println!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
-                  SP:{:02X} CYC:{:>3} SL:{:}",
-                 self.program_counter,
-                 instr,
-                 self.accumulator,
-                 self.index_x,
-                 self.index_y,
-                 tmp,
-                 self.stack_pointer,
-                 tmpcycle,
-                 tmpscanline,
-                 ); //, self.status_reg);
-
-
-        self.cycle = self.cycle + (timing[instr as usize] * PPU_MULTIPLIER);
-
-        instr
-    }
-*/
 
     pub fn nmi (&mut self){
         let hi = (self.program_counter >> 8) as u8;
@@ -1429,6 +1388,7 @@ impl CPU {
         let lo = self.cpu_read_u8(tmp as u16) as u16;
         let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
         let value: u16 = hi << 8 | lo;
+        // println!("IndirectY address is {:#X}", value);
         let result = value.wrapping_add(self.index_y as u16);
         if page_check && (hi != result >> 8) {
             self.cycle += 1 * PPU_MULTIPLIER;
@@ -1521,7 +1481,9 @@ impl CPU {
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
-                println!("Wrote {:#X} at {:#X} in RAM", value, addr);
+                if addr > 0x1FF && addr < 0x300 {
+                    // println!("Wrote {:#X} at {:#X} in RAM", value, addr);
+                };
                 self.bus.ram[addr as usize] = value
             }
 
@@ -1541,17 +1503,18 @@ impl CPU {
             }
 
             OAMDMA => {
-                println!("OAMDMA at {:#X}", value);
-                for i in 0..0xFF {
+                // println!("OAMDMA at {:#X}", value);
+                for i in 0..0x100 {
                     let ramaddr:usize = (value as usize) << 8 | i;
                     let data = self.bus.ram[ramaddr];
+                    // println!("ramaddr: {:#X} data: {:#X}", ramaddr, data);
                     self.bus.ppu.write_oamdata(data);
                 }
-                let mut cycles = 513;
-                if self.cycle % 2 == 1 {
+                //let mut cycles = 513;
+                /*if self.cycle % 2 == 1 {
                     cycles += 1;
-                }
-                self.cycle += cycles * PPU_MULTIPLIER;
+                }*/
+                self.cycle += 513 * PPU_MULTIPLIER;
                 self.bus.ppu.scanline += 4;
             }
 

@@ -28,12 +28,12 @@ impl APU {
             println!("APU write {:#b} at {:#X} - unimplemented", value, addr);
         }
     }
-
+/*
     pub fn read_status_reg(&self) -> u8 {
         println!("APU status read, returning 0");
         0
     }
-
+*/
     fn write_status_reg(&mut self, value: u8) {
         self.dmc_en = (value & (1 << 4)) != 0;        //D
         self.noise_lc_en = (value & (1 << 3)) != 0;   //N

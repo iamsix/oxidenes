@@ -10,3 +10,4 @@ target/
 auto-save-list
 tramp
 .\#*
+SDL2.dll

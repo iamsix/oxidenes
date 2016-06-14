@@ -14,14 +14,16 @@ pub struct ChrRom {
     pub vertical_mirroring: bool,
     pub four_screen_vram: bool,
 
-    mapper: u8,
+    _mapper: u8,
 }
 
 // TODO: separate rom_file reads to read only the relevant parts
 impl ChrRom {
     pub fn new() -> ChrRom {
+
         let romfile = read_rom_file();
-        ChrRom {
+
+        let mut chr = ChrRom {
             prg_rom_banks: romfile[4],
             chr_rom_banks: romfile[5],
 
@@ -30,17 +32,29 @@ impl ChrRom {
             four_screen_vram: romfile[6] & (2 << 3) != 0,
             //           prg_ram_present: false,
             //           trainer: false,
-            mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
+            _mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
 
-            rom: romfile,
+            rom: vec![0; 0x2000].into_boxed_slice(),
+        };
+
+        if chr.chr_rom_banks != 0 {
+            let offset = INES_OFFSET as usize + (1024 * 16 * chr.prg_rom_banks as usize);
+            let mut rom = Vec::new();
+            rom.extend_from_slice(&romfile[offset..offset + 0x2000]);
+            chr.rom = rom.into_boxed_slice();
         }
 
+        chr
     }
 
     pub fn read_u8(&self, addr: u16) -> u8 {
         // TODO: MAPPERS!
-        let offset = INES_OFFSET as usize + 1024 * 16 * self.prg_rom_banks as usize;
-        self.rom[offset + addr as usize]
+        self.rom[addr as usize]
+    }
+
+    pub fn write_u8(&mut self, addr:u16, data: u8) {
+
+        self.rom[addr as usize] = data;
     }
 
 }

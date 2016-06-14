@@ -1,4 +1,4 @@
 OxideNES 
 A NES emulator in Rust. 
 
-Currently just implementing CPU ops
+CPU is fully emulated, currently working PPU interaction and rendering.

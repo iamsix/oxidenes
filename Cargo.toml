@@ -3,3 +3,6 @@
 name = "oxidenes"
 version = "0.0.1"
 authors = [ "me" ]
+
+[dependencies]
+sdl2 = "0.20"
