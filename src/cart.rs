@@ -57,8 +57,8 @@ impl ChrRom {
 
         self.rom[addr as usize] = data;
     }
-
 }
+
 
 
 pub struct Cart {

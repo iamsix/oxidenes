@@ -19,6 +19,9 @@ pub struct CPU {
     pub stack_pointer: u8, // S or SP
 
     pub bus: Bus,
+
+    pub joy1: u8,
+    pub joy1_read: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,6 +94,9 @@ impl CPU {
             program_counter: pc,
             stack_pointer: 0xfd,
             bus: bus,
+
+            joy1: 0,
+            joy1_read: 0,
         }
     }
 
@@ -101,7 +107,7 @@ impl CPU {
         self.push_stack(lo);
         let sr: u8 = self.status_reg.into();
         self.push_stack(sr);
-        // println!("NMI");
+ //       println!("NMI");
         let tmp = self.cpu_read_u16(NMI_VECTOR_LOC);
         self.program_counter = tmp;
         // need to add some cycles here..
@@ -1436,7 +1442,14 @@ impl CPU {
             OAMDATA => self.bus.ppu.read_oamdata(),
 
             // TODO: implement joysticks
-            JOY1 => 0,
+            JOY1 => {
+                let ret = (self.joy1 & (1 << self.joy1_read)) >> self.joy1_read;
+                // println!("joy1 {:#b} ret {} at {}", self.joy1, ret, self.joy1_read);
+                self.joy1 &= !(1 << self.joy1_read);
+                self.joy1_read += 1;
+                // if self.joy1_read > 8
+                ret
+            },
             JOY2 => 0,
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
@@ -1519,7 +1532,10 @@ impl CPU {
                 self.bus.ppu.scanline += 4;
             }
 
-            JOY1 => {} // println!("Strobe Controllers {:#X}", value),
+            JOY1 => {if value == 0 {
+                // Sself.joy1 = 0;
+                self.joy1_read = 0;
+            }} // println!("Strobe Controllers {:#X}", value),
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored

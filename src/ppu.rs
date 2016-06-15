@@ -142,7 +142,7 @@ impl PPU {
 
         self.t_vram_addr &= 0x73FF;
         self.t_vram_addr |= (data as u16 & 3) << 10;
-       // println!("Write PPUCTRL {:#b}", data);
+      //  println!("Write PPUCTRL {:#b} scanlien is {}", data, self.scanline);
 /*        self.base_nametable = match data & 3 {
             0 => 0x2000,
             1 => 0x2400,
@@ -225,7 +225,7 @@ impl PPU {
             // self.scroll_y = data;
         }
         self.w_toggle = !self.w_toggle;
-        //println!("PPUSCROLL set: {:#x} t_vram {:#X}", data, self.t_vram_addr);
+        // println!("PPUSCROLL set: {:#x} t_vram {:#X}", data, self.t_vram_addr);
     }
 
     // $2006
@@ -241,34 +241,38 @@ impl PPU {
 
             self.vram_addr = self.t_vram_addr;
             // self.ppu_addr |= data as u16;
-            // println!("PPUADDR set: {:#X}", self.vram_addr);
+//            println!("PPUADDR set: {:#X}", self.vram_addr);
         }
         self.w_toggle = !self.w_toggle;
     }
 
-    // TODO - mappers - CHRRAM etc.
+    // TODO - mappers
     pub fn write_ppudata(&mut self, data:u8) {
         self.lastwrite = data;
-        // println!("PPUDATA virtual addr {:#X}", self.vram_addr);
-        match self.vram_addr {
-            0x0000...0x1FFF => self.chr.write_u8(self.vram_addr, data),
-            0x2000...0x3EFF => {
+        let mut v_addr = self.vram_addr;
+        // println!("write PPUDATA {:#x} at virtual addr {:#X}", data, self.vram_addr);
+        match v_addr {
+            0x0000...0x1FFF => self.chr.write_u8(v_addr, data),
+            0x2000...0x2FFF => {
+                // if v_addr > 0x3000 {
+                //    v_addr -= 0x1000;
+                // }
                 let mut offset:u16 = 0;
-                if self.chr.vertical_mirroring && self.vram_addr >= 0x2800 {
+                if self.chr.vertical_mirroring && v_addr >= 0x2800 {
                     offset = 0x800;
                 } else if self.chr.horizontal_mirroring &&
-                    (self.vram_addr >= 0x2400 && self.vram_addr < 0x2800) ||
-                    (self.vram_addr >= 0x2C00 && self.vram_addr < 0x3000)
+                    (v_addr >= 0x2400 && v_addr < 0x2800) ||
+                    (v_addr >= 0x2C00 && v_addr < 0x3000)
                 {
                     offset = 0x400;
                 }
 
-                let realaddr = (self.vram_addr - 0x2000) - offset;
+                let realaddr = (v_addr - 0x2000) - offset;
                 self.vram[realaddr as usize] = data;
                 // if realaddr =
-                // println!("Writing PPURAM {:#X} at {:#X}", data, realaddr);
+         //       println!("Writing PPURAM {:#X} at {:#X} = {:#X}", data, v_addr, realaddr);
             }
-            // 0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
+            0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
             0x3F00...0x3FFF => {
                 let mut realaddr = (self.vram_addr - 0x3F00) % 0x20;
                 if realaddr == 0x10 || realaddr == 0x14 || realaddr == 0x18 || realaddr == 0x1C {
@@ -291,7 +295,7 @@ impl PPU {
 //        println!("read from {:#X}", addr);
         match addr {
             0x0000...0x1FFF => self.chr.read_u8(addr),
-            0x2000...0x3EFF => {
+            0x2000...0x2FFF => {
                 //if addr > 0x3000 {
                 //    addr -= 0x1000;
                 //  }
@@ -308,7 +312,7 @@ impl PPU {
                 let realaddr = (addr - 0x2000) - offset;
                 self.vram[realaddr as usize]
             }
-            // 0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
+            0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
             0x3F00...0x3FFF => {
                 let mut realaddr = (addr - 0x3F00) % 0x20;
                 if realaddr == 0x10 || realaddr == 0x14 || realaddr == 0x18 || realaddr == 0x1C {
@@ -345,28 +349,6 @@ impl PPU {
         }
     }
 
-    /*
-    // used for internal reads when we want to increment ppu_addr
-    fn unbuffered_ppudata(&mut self) -> u8 {
-        let tmp = self.vram_addr;
-        if !self.vram_increment {
-            self.vram_addr += 1;
-        } else {
-            // not sure of this...
-            self.vram_addr += 32;
-        }
-        self.read_data(tmp)
-    }*/
-
-//    $0000-$0FFF 	$1000 	Pattern table 0
-//    $1000-$1FFF 	$1000 	Pattern Table 1
-//    $2000-$23FF 	$0400 	Nametable 0
-//    $2400-$27FF 	$0400 	Nametable 1
-//    $2800-$2BFF 	$0400 	Nametable 2
-//    $2C00-$2FFF 	$0400 	Nametable 3
-//    $3F00-$3F1F 	$0020 	Palette RAM indexes
-//    $3F30-$3FFFF    Mirrors Pallete RAM - MUST BE EMULATED
-
 // nametables contain offsets referring to patterns..
     fn render_bg(&mut self) {
         // TODO: scrolling - which needs messing with nametable stuff
@@ -381,43 +363,26 @@ impl PPU {
         // using the PPU's actual functions for this should be correct..
         let sl = self.scanline;
         let bgcolor = PALETTE[self.palette[0] as usize];
-        // let scrollx = self.scroll_x as u16;
-        // let scrollx_offset = scrollx % 8;
 
-
-        let startcol = (self.vram_addr & 0x1F) as u8;
-        let endcol = startcol + 32;
-        // self.ppu_addr = self.base_nametable + (32 * (sl as u16 / 8)) + startcol;
-        //let endcol = startcol + 32;
-        //let sloffset = (sl as u16 / 32) * 8;
-        //for col in startcol..endcol {
         for col in 0..32 {
 
-   //         println!("{:#x}", self.vram_addr);
-            /* if col == 32 {
-                if self.base_nametable == 0x2000 {
-                    self.ppu_addr = 0x2400 + (32 * (sl as u16 / 8));
-                } else {
-                    self.ppu_addr = 0x2000 + (32 * (sl as u16 / 8));
-                }
-
-            } */
             let att_tbl_addr = 0x23C0 |
                                 (self.vram_addr & 0x0C00) |
                                 ((self.vram_addr >> 4) & 0x38) |
                                 ((self.vram_addr >> 2) & 0x07);
 
+            // TODO need to offset attr table with fine_x
             let attr_table = self.read_data(att_tbl_addr);
             // println!("Attr table is {:#X} read from {:#X}", attr_table, att_tbl_addr);
             let attr:usize;
             if (sl % 32) / 16 == 0 {
-                if (col % 4) / 2  == 0 {
+                if ((self.vram_addr & 0xFFFF) % 4) / 2 == 0 {
                     attr = ((attr_table & 0b0000_0011) >> 0) as usize;
                 } else {
                     attr = ((attr_table & 0b0000_1100) >> 2) as usize;
                 }
             } else {
-                if (col % 4) / 2 == 0 {
+                if ((self.vram_addr & 0xFFFF) % 4) / 2 == 0 {
                     attr = ((attr_table & 0b0011_0000) >> 4) as usize;
                 } else {
                     attr = ((attr_table & 0b1100_0000) >> 6) as usize;
@@ -452,41 +417,35 @@ impl PPU {
                 let pv = ((tile_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (tile_data1 & (1 << 7 - px)) >> 7 - px;
                 let pixel = tile_palette[pv as usize];
 
-                // let screenx = ((((col - (scrollx / 8)) * 8) + px) - scrollx_offset) as usize;
                 self.screen[sl as usize][((col * 8) + px - self.fine_x) as usize] = pixel;
 
                 if sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 && !self.sprite0_hit {
                     self.sprite0_bg_prerender[((col * 8) + px - self.fine_x) as usize] = pv;
                 }
             }
-
             self.increment_x();
+
         }
         // println!("universal BG is {:#X}", bgcolor);
 }
 
-    fn render_sprite(&mut self, bg: bool) {
+    fn render_sprites(&mut self) {
         // TODO: deal with more than 8 sprites on a scanline
         // TODO: 8x16 sprites
         let sl = self.scanline;
         for mut sprite in 0..64 {
             sprite = 63 - sprite;
-            // let offset = if bg
-            let condition = if bg {
-                (self.oam[(sprite * 4) + 2] & 0x20) != 0
-            } else {
-                (self.oam[(sprite * 4) + 2] & 0x20) == 0
-            };
 
             let y = self.oam[sprite * 4] as i16;
             // println!("sprite {:} is at {:}", sprite, y);
-          //  if (y <= sl && (y >= (sl - 8))) && condition {
-            if (sl >= y + 1 && sl <= y + 8) && condition {
+            if (sl >= y + 1 && sl <= y + 8) {
                 let mut index = self.oam[(sprite * 4) + 1] as u16 * 16;
                 if self.sprite_table_high {
                     index += 0x1000;
                 }
                 let pal = 0x11 + (self.oam[(sprite * 4) + 2] & 0b11) * 4;
+
+                let background = (self.oam[(sprite * 4) + 2] & 0x20) != 0;
 
                 let flip_h = (self.oam[(sprite * 4) + 2] & (1 << 6)) != 0;
                 let flip_v = (self.oam[(sprite * 4) + 2] & (1 << 7)) != 0;
@@ -503,6 +462,7 @@ impl PPU {
                 let sprite_data1 = self.read_data(index + offset as u16);
                 let sprite_data2 = self.read_data(index + 8 + offset as u16);
 
+                let bgcolor = self.palette[0] as usize;
                 for px in 0..8 {
                     let pv:u8;
                     if flip_h {
@@ -510,8 +470,13 @@ impl PPU {
                     } else {
                         pv = ((sprite_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (sprite_data1 & (1 << 7 - px)) >> 7 - px;
                     }
-                    if pv > 0 {
+                    if (x as usize + px as usize <= 255) &&
+                                    pv > 0 && (!background ||
+                                    (background &&
+                                    self.screen[sl as usize][x as usize + px as usize] == PALETTE[bgcolor])) {
+
                         let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
+
                         let pixel = PALETTE[plt];
                         // println!("pv: {:} pixel {:#X}", pv, pixel);
                         if (x as usize + px as usize) < 256 {
@@ -530,6 +495,28 @@ impl PPU {
 
         // println!("Before: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
 
+        self.scanline += 1;
+        if self.scanline > 260 {
+            self.scanline = -1;
+            self.nmi_generated = false;
+            // self.sprite0_hit = false;
+            if self.initial_reset {self.initial_reset = false};
+
+            self.sprite0_hit = false;
+            self.vblank  = false;
+
+            // self.increment_y();
+            // copy Vertical bits from t to v
+            if self.show_bg || self.show_sprites {
+              //  println!("Frame# {}", self.framecount);
+                self.screen = [[0; 256]; 240];
+                self.vram_addr &= 0x041F;
+                self.vram_addr |= self.t_vram_addr & !0x041F;
+            }
+
+        }
+
+
         if self.scanline >= 0 && self.scanline < 240 {
             if !self.sprite0_hit {
                 self.sprite0_prerender = [0; 8];
@@ -537,63 +524,47 @@ impl PPU {
             }
 
             // let each function run the whole scanline and paint 'over' eachother
-            if self.show_sprites {
-                // render Behind-BG sprites
-                self.render_sprite(true);
-            }
             if self.show_bg {
                 self.render_bg();
             }
             if self.show_sprites {
                 // render FG sprites
-                self.render_sprite(false);
+                self.render_sprites();
             }
 
-            if !self.sprite0_hit {
+
+            if self.show_bg || self.show_sprites {
+                self.increment_y();
+
+                // copy horizontal bits from t to v
+                self.vram_addr &= 0x7BE0;
+                self.vram_addr |= self.t_vram_addr & !0x7BE0;
+
+                // self.increment_x();
+                // self.increment_x();
+            }
+
+            if !self.sprite0_hit && self.show_bg && self.show_sprites {
+                //evaluate 1 line ahead?
+                let tmp = self.vram_addr;
+
                 let px0 = self.oam[3] as usize;
                 for x in 0..8 {
                     let mut offset = px0 + x;
                     let ls = if offset > 254 {
-                            0
-                        } else {
-                            self.sprite0_bg_prerender[offset]
-                        };
+                        0
+                    } else {
+                        self.sprite0_bg_prerender[offset]
+                    };
 
                     if  ls != 0 && self.sprite0_prerender[x] != 0 && !self.sprite0_hit {
                         self.sprite0_hit = true;
+                        // println!("Sprite0 hit on SL {} - sprite0 y is {}", self.scanline, self.oam[0]);
                     }
                 }
             }
-
         }
 
-
-        if self.show_bg && self.show_sprites && !self.vblank {
-            // println!("Before increment: {:#X}", self.vram_addr);
-            self.increment_y();
-            // println!("after increment: {:#X}", self.vram_addr);
-
-            // copy horizontal bits from t to v
-            self.vram_addr &= 0x7BE0;
-            self.vram_addr |= self.t_vram_addr & !0x7BE0;
-            //
-
-            // self.increment_x();
-            // self.increment_x();
-
-        }
-
-        if self.scanline == -1 {
-            self.sprite0_hit = false;
-
-            // copy Vertical bits from t to v
-            if self.show_bg && self.show_sprites {
-                // println!("Frame# {}", self.framecount);
-                self.screen = [[0; 256]; 240];
-                self.vram_addr &= 0x041F;
-                self.vram_addr |= self.t_vram_addr & !0x041F;
-            }
-        }
 
         if self.scanline == 241 && !self.initial_reset {
             self.vblank = true;
@@ -603,28 +574,17 @@ impl PPU {
             }
         }
 
-        self.scanline += 1;
 
-        if self.scanline > 260 {
-            self.scanline = -1;
-            self.vblank  = false;
-            self.nmi_generated = false;
-            // self.sprite0_hit = false;
-            if self.initial_reset {self.initial_reset = false};
-        }
-
-        // println!("After: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
         if self.vblank && self.nmi_enable && !self.nmi_generated{
             self.nmi_generated = true;
             return true;
         }
-
         false
-        //println!("Read from CHR read byte {:#x} ", self.chr.read_u8(0));
     }
 
     fn increment_y(&mut self) {
         // y increment V...
+        // println!("pre-INCR y {:#X}", self.vram_addr);
         if (self.vram_addr & 0x7000) != 0x7000 {  // if fine Y < 7
             self.vram_addr += 0x1000;  // Incr fine y
             // println!("Incr fine y");
