@@ -101,7 +101,7 @@ impl CPU {
         self.push_stack(lo);
         let sr: u8 = self.status_reg.into();
         self.push_stack(sr);
-        println!("NMI");
+        // println!("NMI");
         let tmp = self.cpu_read_u16(NMI_VECTOR_LOC);
         self.program_counter = tmp;
         // need to add some cycles here..
@@ -1433,6 +1433,7 @@ impl CPU {
 
             PPUSTATUS => self.bus.ppu.read_ppustatus(),
             PPUDATA => self.bus.ppu.read_ppudata(),
+            OAMDATA => self.bus.ppu.read_oamdata(),
 
             // TODO: implement joysticks
             JOY1 => 0,
@@ -1498,7 +1499,7 @@ impl CPU {
             PPUADDR => self.bus.ppu.write_ppuaddr(value),
             PPUDATA => self.bus.ppu.write_ppudata(value),
 
-            APU_REGISTERS_START...APU_REGISTERS_END | SND_CHN => {
+            APU_REGISTERS_START...APU_REGISTERS_END | SND_CHN | JOY2 => {
                 self.bus.apu.write(addr, value);
             }
 
@@ -1518,7 +1519,7 @@ impl CPU {
                 self.bus.ppu.scanline += 4;
             }
 
-            JOY1 => println!("Strobe Controllers {:#X}", value),
+            JOY1 => {} // println!("Strobe Controllers {:#X}", value),
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored

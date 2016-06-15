@@ -5,6 +5,7 @@ use std::io::Read;
 use mem_map::*;
 const INES_OFFSET: u16 = 0x10;
 
+#[derive(Debug)]
 pub struct ChrRom {
     rom: Box<[u8]>,
 
@@ -19,9 +20,9 @@ pub struct ChrRom {
 
 // TODO: separate rom_file reads to read only the relevant parts
 impl ChrRom {
-    pub fn new() -> ChrRom {
+    pub fn new(rompath: &String) -> ChrRom {
 
-        let romfile = read_rom_file();
+        let romfile = read_rom_file(rompath);
 
         let mut chr = ChrRom {
             prg_rom_banks: romfile[4],
@@ -76,8 +77,8 @@ pub struct Cart {
 }
 
 impl Cart {
-    pub fn new() -> Cart {
-        let romfile = read_rom_file();
+    pub fn new(rompath: &String) -> Cart {
+        let romfile = read_rom_file(rompath);
         Cart {
             prg_rom_banks: romfile[4],
             chr_rom_banks: romfile[5],
@@ -98,7 +99,7 @@ impl Cart {
         let read_pos = self.map_rom(addr);
         // println!("Read position {:#x}", read_pos)
         let value = self.rom[read_pos];
-        // println!("Read byte: {:#x}", value);
+        // println!("Read byte: {:#x} from {:#x}", value, read_pos);
         value
     }
 
@@ -115,7 +116,7 @@ impl Cart {
 
         let read_pos: usize;
 
-        if addr >= PRG_ROM_LOWER_START && addr < PRG_ROM_LOWER_START + PRG_ROM_LOWER_LEN - 1 {
+        if addr >= PRG_ROM_LOWER_START && addr < PRG_ROM_LOWER_START + PRG_ROM_LOWER_LEN {
             // println!("shouldn't be here yet");
             read_pos = ((addr - PRG_ROM_LOWER_START) + INES_OFFSET) as usize;
         } else if addr >= PRG_ROM_UPPER_START && addr <= PRG_ROM_UPPER_START + (PRG_ROM_UPPER_LEN - 1) {
@@ -136,8 +137,8 @@ impl Cart {
 }
 
 // TODO: Read rom file path from args
-fn read_rom_file() -> Box<[u8]> {
-    let mut rom_file = File::open("smb.nes").unwrap();
+fn read_rom_file(rompath: &String) -> Box<[u8]> {
+    let mut rom_file = File::open(rompath).unwrap();
     let mut rom_buffer = Vec::new();
     rom_file.read_to_end(&mut rom_buffer).unwrap();
     rom_buffer.into_boxed_slice()

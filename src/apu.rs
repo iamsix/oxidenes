@@ -25,7 +25,7 @@ impl APU {
         if addr == APU_STATUS_REG {
             self.write_status_reg(value);
         } else {
-            println!("APU write {:#b} at {:#X} - unimplemented", value, addr);
+            // println!("APU write {:#b} at {:#X} - unimplemented", value, addr);
         }
     }
 /*

@@ -5,7 +5,7 @@ use sdl2::rect::Rect;
 
 use sdl2::event::{Event,WindowEventId};
 
-// use std::env;
+use std::env;
 use std::fmt;
 
 mod cart;
@@ -25,6 +25,7 @@ pub struct Bus {
 }
 
 fn main() {
+    let rompath = env::args().nth(1).unwrap_or(String::from("smb.nes"));
 
     let sdl = sdl2::init().unwrap();
     let video = sdl.video().unwrap();
@@ -35,13 +36,15 @@ fn main() {
         .unwrap();
 
     let mut renderer = window.renderer().build().unwrap();
-    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24, 256, 240).unwrap();
+    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24,
+                                                        256,
+                                                        240).unwrap();
     let mut event = sdl.event_pump().unwrap();
 
 
-    let cart = cart::Cart::new();
+    let cart = cart::Cart::new(&rompath);
     println!("{:#?}", cart);
-    let chr_rom = cart::ChrRom::new();
+    let chr_rom = cart::ChrRom::new(&rompath);
     let apu = apu::APU::new();
 
     let ppu = ppu::PPU::new(chr_rom);
@@ -56,6 +59,7 @@ fn main() {
     let mut cpu = cpu::CPU::new(cpubus, pc as u16);
     println!("{:#?}", cpu);
 
+    let mut ticks = 0;
     // TODO: re-add specific run conditions for debugging
     let mut nmi = false;
     loop {
@@ -81,16 +85,19 @@ fn main() {
 */
 
         cpu.cycle = cpu.cycle + (cpu::TIMING[instr as usize] * cpu::PPU_MULTIPLIER);
+        ticks += cpu::TIMING[instr as usize] * cpu::PPU_MULTIPLIER;
 
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
             nmi = cpu.bus.ppu.render_scanline();
         }
-
         if cpu.bus.ppu.scanline == 241 {
             // println!("screen 10,10 properly: {:#X}", cpu.bus.ppu.screen[10][10]);
             render_frame(&cpu.bus.ppu.screen, &mut renderer, &mut texture, &mut event);
         }
+        // if cpu.bus.ppu.scanline == -1 {
+        //     println!("{} ticks", ticks);
+        // }
 
 
         cpu.execute_op(instr);
@@ -100,6 +107,7 @@ fn main() {
         if nmi && cpu.cycle > 2 {
             cpu.nmi();
             nmi = false;
+            ticks = 0;
         }
 
 
