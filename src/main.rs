@@ -1,9 +1,12 @@
 extern crate sdl2;
+extern crate time;
 
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::keyboard::Keycode;
 use sdl2::event::{Event,WindowEventId};
+
+// use time;
 
 use std::env;
 use std::fmt;
@@ -13,6 +16,7 @@ mod mem_map;
 mod cpu;
 mod apu;
 mod ppu;
+mod opcodes;
 
 use mem_map::*;
 // use cpu::RunCondition;
@@ -67,8 +71,9 @@ fn main() {
         let pc = cpu.program_counter;
         let instr = cpu.cpu_read_u8(pc);
 
-        // TODO: Move this to a specific debug output
 /*
+        // TODO: Move this to a specific debug output
+if cpu.bus.ppu.framecount == 21 || cpu.bus.ppu.framecount == 22 {
         let tmp: u8 = cpu.status_reg.into();
         print!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
                   SP:{:02X} CYC:{:>3} SL:{:} \r\n",
@@ -82,15 +87,25 @@ fn main() {
                  cpu.cycle % 341,
                  cpu.bus.ppu.scanline,
                  ); //, self.status_reg);
+}
 */
 
         cpu.cycle = cpu.cycle + (cpu::TIMING[instr as usize] * cpu::PPU_MULTIPLIER);
-//        ticks += cpu::TIMING[instr as usize] * cpu::PPU_MULTIPLIER;
 
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
             nmi = cpu.bus.ppu.render_scanline();
         }
+        cpu.execute_op(instr);
+
+        // If the cycle count isn't > 1 yet
+        // then the vblank flag wouldn't have been set at this point
+        // since vblank is set on dot 1 of line 341
+        if nmi && cpu.cycle > 2 {
+            cpu.nmi();
+            nmi = false;
+        }
+
 
         if cpu.bus.ppu.scanline == 240 {
             // println!("screen 10,10 properly: {:#X}", cpu.bus.ppu.screen[10][10]);
@@ -144,21 +159,6 @@ fn main() {
 
             }
         }
-
-        cpu.execute_op(instr);
-
-        // If the cycle count isn't > 1 yet
-        // then the vblank flag wouldn't have been set at this point
-        // since vblank is set on dot 1 of line 341
-        if nmi && cpu.cycle > 2 {
-            cpu.nmi();
-            nmi = false;
-  //          ticks = 0;
-        }
-
-
-        //if cpu.program_counter == 0x8057 {break;}
-
 
     }
 

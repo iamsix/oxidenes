@@ -6,3 +6,4 @@ authors = [ "me" ]
 
 [dependencies]
 sdl2 = "0.20"
+time = "0.1"

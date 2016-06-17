@@ -72,7 +72,7 @@ pub struct PPU {
 
     pub screen: [[u32; 256]; 240],
 
-    framecount: usize,
+    pub framecount: usize,
 }
 
 impl PPU {
@@ -215,6 +215,7 @@ impl PPU {
         self.lastwrite = data;
         if !self.w_toggle {
             self.fine_x = data & 0x7;
+            println!("Finex set to {} after SL {}", self.fine_x, self.scanline);
             self.t_vram_addr &= 0xFFE0;
             self.t_vram_addr |= ((data & 0xF8) >> 3) as u16;
             // self.scroll_x = data;
@@ -363,8 +364,15 @@ impl PPU {
         // using the PPU's actual functions for this should be correct..
         let sl = self.scanline;
         let bgcolor = PALETTE[self.palette[0] as usize];
+        let endcol = if self.fine_x != 0 {
+            33
+        } else {
+            32
+        };
 
-        for col in 0..32 {
+
+        for col in 0..endcol {
+            let coarsex = self.vram_addr & 0x001F;
 
             let att_tbl_addr = 0x23C0 |
                                 (self.vram_addr & 0x0C00) |
@@ -376,13 +384,13 @@ impl PPU {
             // println!("Attr table is {:#X} read from {:#X}", attr_table, att_tbl_addr);
             let attr:usize;
             if (sl % 32) / 16 == 0 {
-                if ((self.vram_addr & 0xFFFF) % 4) / 2 == 0 {
+                if (coarsex % 4) / 2 == 0 {
                     attr = ((attr_table & 0b0000_0011) >> 0) as usize;
                 } else {
                     attr = ((attr_table & 0b0000_1100) >> 2) as usize;
                 }
             } else {
-                if ((self.vram_addr & 0xFFFF) % 4) / 2 == 0 {
+                if (coarsex % 4) / 2 == 0 {
                     attr = ((attr_table & 0b0011_0000) >> 4) as usize;
                 } else {
                     attr = ((attr_table & 0b1100_0000) >> 6) as usize;
@@ -413,16 +421,28 @@ impl PPU {
             } else {
                 0
             };
-            for px in finestart..8 {
-                let pv = ((tile_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (tile_data1 & (1 << 7 - px)) >> 7 - px;
-                let pixel = tile_palette[pv as usize];
+            let fineend = if col == endcol - 1 {
+                8 - self.fine_x
+            } else {
+                8
+            };
+            for px in 0..8 {
+                let pixel_x = (col as isize * 8) - self.fine_x as isize + px as isize;
+                if pixel_x <= 255 && pixel_x >= 0 {
+                    let pv = ((tile_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (tile_data1 & (1 << 7 - px)) >> 7 - px;
+                    if pv > 0 {
+                        let pixel = tile_palette[pv as usize];
+                        // println!("Col {} pixel {} finex {} px {}", col, (col * 8) - self.fine_x + px, self.fine_x, px);
 
-                self.screen[sl as usize][((col * 8) + px - self.fine_x) as usize] = pixel;
+                        self.screen[sl as usize][pixel_x as usize] = pixel;
 
-                if sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 && !self.sprite0_hit {
-                    self.sprite0_bg_prerender[((col * 8) + px - self.fine_x) as usize] = pv;
+                        if sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 && !self.sprite0_hit {
+                            self.sprite0_bg_prerender[pixel_x as usize] = pv;
+                        }
+                    }
                 }
             }
+
             self.increment_x();
 
         }
@@ -470,18 +490,19 @@ impl PPU {
                     } else {
                         pv = ((sprite_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (sprite_data1 & (1 << 7 - px)) >> 7 - px;
                     }
-                    if (x as usize + px as usize <= 255) &&
-                                    pv > 0 && (!background ||
-                                    (background &&
-                                    self.screen[sl as usize][x as usize + px as usize] == PALETTE[bgcolor])) {
-
-                        let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
-
-                        let pixel = PALETTE[plt];
-                        // println!("pv: {:} pixel {:#X}", pv, pixel);
-                        if (x as usize + px as usize) < 256 {
-                            self.screen[sl as usize][x as usize + px as usize] = pixel;
-                        }
+                    if (x as usize + px as usize <= 255) && pv > 0 {
+                        let bgpixel = self.screen[sl as usize][x as usize + px as usize];
+                        let pixel = if background && bgpixel != PALETTE[bgcolor] {
+                            bgpixel
+                        } else {
+                            if !self.sprite0_hit && sprite == 0 {
+                                self.sprite0_hit = true;
+                                // println!("Sprite0 hit on SL {} - sprite0 y is {}", self.scanline, self.oam[0]);
+                            }
+                            let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
+                            PALETTE[plt]
+                        };
+                        self.screen[sl as usize][x as usize + px as usize] = pixel;
                     }
                     if sprite == 0 && !self.sprite0_hit {
                         self.sprite0_prerender[px] = pv;
@@ -508,8 +529,9 @@ impl PPU {
             // self.increment_y();
             // copy Vertical bits from t to v
             if self.show_bg || self.show_sprites {
-              //  println!("Frame# {}", self.framecount);
-                self.screen = [[0; 256]; 240];
+                println!("Frame# {}", self.framecount);
+                let bgcolor = PALETTE[self.palette[0] as usize];
+                self.screen = [[bgcolor; 256]; 240];
                 self.vram_addr &= 0x041F;
                 self.vram_addr |= self.t_vram_addr & !0x041F;
             }
@@ -528,7 +550,6 @@ impl PPU {
                 self.render_bg();
             }
             if self.show_sprites {
-                // render FG sprites
                 self.render_sprites();
             }
 
@@ -540,8 +561,6 @@ impl PPU {
                 self.vram_addr &= 0x7BE0;
                 self.vram_addr |= self.t_vram_addr & !0x7BE0;
 
-                // self.increment_x();
-                // self.increment_x();
             }
 
             if !self.sprite0_hit && self.show_bg && self.show_sprites {
@@ -559,10 +578,11 @@ impl PPU {
 
                     if  ls != 0 && self.sprite0_prerender[x] != 0 && !self.sprite0_hit {
                         self.sprite0_hit = true;
-                        // println!("Sprite0 hit on SL {} - sprite0 y is {}", self.scanline, self.oam[0]);
+
                     }
                 }
             }
+
         }
 
 

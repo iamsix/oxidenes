@@ -1,5 +1,6 @@
 use super::*;
 use mem_map::*;
+use opcodes::*;
 // use std::collections::HashSet;
 
 // pub HashMap: ops;
@@ -36,6 +37,7 @@ pub struct StatusReg {
     carry: bool, // C
 }
 
+
 #[derive(Debug)]
 enum RegType {
     A,
@@ -43,6 +45,7 @@ enum RegType {
     Y,
 }
 
+/*
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum AddressMode {
     Accumulator,
@@ -56,7 +59,7 @@ enum AddressMode {
     ZeropageX,
     ZeropageY,
 }
-
+*/
 
 pub const PPU_MULTIPLIER:isize = 3;
 pub const TIMING: [isize;256] = [
@@ -98,6 +101,17 @@ impl CPU {
             joy1: 0,
             joy1_read: 0,
         }
+    }
+
+    pub fn read_instruction(&mut self) -> (u8, Instruction) {
+        let pc = self.program_counter;
+        let op = self.cpu_read_u8(pc);
+        let mut instr = INSTRUCTIONS[op as usize];
+
+
+
+
+        (op, instr)
     }
 
     pub fn nmi (&mut self){
