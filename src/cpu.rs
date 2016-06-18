@@ -45,42 +45,7 @@ enum RegType {
     Y,
 }
 
-/*
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum AddressMode {
-    Accumulator,
-    Absolute,
-    AbsoluteX,
-    AbsoluteY,
-    Immediate,
-    XIndirect,
-    IndirectY,
-    Zeropage,
-    ZeropageX,
-    ZeropageY,
-}
-*/
-
 pub const PPU_MULTIPLIER:isize = 3;
-pub const TIMING: [isize;256] = [
-        /*            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F       */
-                      7, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 4, 4, 6, 6, /* 0 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 1 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 4, 4, 6, 6, /* 2 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 3 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 3, 2, 2, 2, 3, 4, 6, 6, /* 4 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 5 */
-                      6, 6, 0, 8, 3, 3, 5, 5, 4, 2, 2, 2, 5, 4, 6, 6, /* 6 */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* 7 */
-                      2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* 8 */
-                      2, 6, 0, 6, 4, 4, 4, 4, 2, 5, 2, 5, 5, 5, 5, 5, /* 9 */
-                      2, 6, 2, 6, 3, 3, 3, 3, 2, 2, 2, 2, 4, 4, 4, 4, /* A */
-                      2, 5, 0, 5, 4, 4, 4, 4, 2, 4, 2, 4, 4, 4, 4, 4, /* B */
-                      2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* C */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7, /* D */
-                      2, 6, 2, 8, 3, 3, 5, 5, 2, 2, 2, 2, 4, 4, 6, 6, /* E */
-                      2, 5, 0, 8, 4, 4, 6, 6, 2, 4, 2, 7, 4, 4, 7, 7];/* F */
-        /*            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F       */
 
 impl CPU {
     pub fn new(bus: Bus, pc: u16) -> CPU {
@@ -108,6 +73,121 @@ impl CPU {
         let op = self.cpu_read_u8(pc);
         let mut instr = INSTRUCTIONS[op as usize];
 
+        let operand = if instr.bytes == 3 {
+            Some(self.cpu_read_u16(pc + 1))
+        } else if instr.bytes == 2 {
+            Some(self.cpu_read_u8(pc + 1) as u16)
+        } else {
+            None
+        };
+
+        if operand != None {
+            instr.operand = operand.unwrap();
+        }
+
+        self.program_counter += instr.bytes as u16;
+
+        let mut page_crossed = false;
+        let mut branching = false;
+        let dataaddr:Option<u16> = match instr.addr_mode {
+            AddressMode::Immediate => Some(pc + 1),
+            AddressMode::Absolute => Some(operand.unwrap()),
+            AddressMode::AbsoluteX => {
+                let addr = operand.unwrap().wrapping_add(self.index_x as u16);
+                if instr.page_boundary_cycle && (operand.unwrap() >> 8 != addr >> 8) {
+                     page_crossed = true;
+                }
+                Some(addr)
+            }
+            AddressMode::AbsoluteY => {
+                let addr = operand.unwrap().wrapping_add(self.index_y as u16);
+                if instr.page_boundary_cycle && (operand.unwrap() >> 8 != addr >> 8) {
+                     page_crossed = true;
+                }
+                Some(addr)
+            }
+            AddressMode::XIndirect => {
+                let mut tmp = operand.unwrap() as u8;
+                tmp = tmp.wrapping_add(self.index_x);
+                let lo = self.cpu_read_u8(tmp as u16) as u16;
+                let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
+                Some(hi << 8 | lo)
+            }
+            AddressMode::IndirectY => {
+                let tmp = operand.unwrap() as u8;
+                let lo = self.cpu_read_u8(tmp as u16) as u16;
+                let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
+                let value: u16 = hi << 8 | lo;
+                let addr = value.wrapping_add(self.index_y as u16);
+                if instr.page_boundary_cycle && (hi != addr >> 8) {
+                    page_crossed = true;
+                }
+                Some(addr)
+            }
+            AddressMode::Zeropage => Some(operand.unwrap()),
+            AddressMode::ZeropageX => {
+                let tmp = operand.unwrap() as u8;
+                Some(tmp.wrapping_add(self.index_x) as u16)
+            }
+            AddressMode::ZeropageY => {
+                let tmp = operand.unwrap() as u8;
+                Some(tmp.wrapping_add(self.index_y) as u16)
+            }
+            AddressMode::Indirect => Some(pc + 1),
+            AddressMode::Relative => {
+
+                // we have to evaluate the whole branch during this phase
+                // to accurately count the CPU ticks
+                branching = match op {
+                    // BVC - relative - 2 bytes
+                    0x50 => !self.status_reg.overflow,
+                    // BVS - relative - 2 bytes
+                    0x70 => self.status_reg.overflow,
+                    // BCS - relative - 2 bytes
+                    0xb0 => self.status_reg.carry,
+                    // BCC - relative - 2 bytes
+                    0x90 => !self.status_reg.carry,
+                    // BEQ - relative
+                    0xf0 => self.status_reg.zero,
+                    // BNE - relative
+                    0xd0 => !self.status_reg.zero,
+                    // BPL - relative
+                    0x10 => !self.status_reg.negative_sign,
+                    // BMI - rel
+                    0x30 => self.status_reg.negative_sign,
+
+                    _ => panic!("instruction {:#X} should not be relative", op)
+
+                };
+
+                // wrapping? not sure how signed deal with those...
+                if branching {
+                    let tmp = operand.unwrap() as i8 as i16;
+                    let addr = (self.program_counter as i16 + tmp) as u16;
+                    if addr >> 8 != (self.program_counter + 1) >> 8 {
+                        page_crossed = true;
+                    };
+                    Some(addr)
+                } else {
+                    Some(self.program_counter)
+                }
+
+            }
+
+            _ => None,
+        };
+
+        if dataaddr != None {
+            instr.dest_addr = dataaddr;
+        }
+        // increment the cycle counter as-needed.
+        // self.cycle += instr.ticks as isize* PPU_MULTIPLIER;
+        if page_crossed {
+            instr.ticks += 1;
+        }
+        if branching {
+            instr.ticks += 1;
+        }
 
 
 
@@ -129,22 +209,23 @@ impl CPU {
     }
 
 
-    pub fn execute_op(&mut self, instr: u8) {
+    pub fn execute_op(&mut self, op: u8, instr: Instruction) {
 
-        self.program_counter += 1;
-        match instr {
+        let addr = instr.dest_addr.unwrap_or(0);
+        // self.program_counter += 1;
+        match op {
 
             0x4C => {
                 // JMP-absolute
-                let value = self.cpu_read_u16(self.program_counter);
-                self.program_counter = value;
+                // let value = instr.operand;
+                self.program_counter = instr.operand;
             }
 
             0x6C => {
                 // JMP-indirect
-                let pc = self.program_counter;
-                let lotmp = self.cpu_read_u8(pc);
-                let hitmp = self.cpu_read_u8(pc + 1);
+                // let pc = self.program_counter;
+                let lotmp = self.cpu_read_u8(addr);
+                let hitmp = self.cpu_read_u8(addr + 1);
                 // because there is no carry the lo byte of effective addr wraps +1
                 // see http://www.6502.org/tutorials/6502opcodes.html under JMP
 
@@ -156,173 +237,33 @@ impl CPU {
                 self.program_counter = hi << 8 | lo;
             }
 
-            // LSR - A
-            0x4A => self.shift_right(AddressMode::Accumulator),
+            // LSR
+            0x4A | 0x46 | 0x56 | 0x4E | 0x5E => self.shift_right(instr.addr_mode, addr),
 
-            // LSR - zeropage
-            0x46 => self.shift_right(AddressMode::Zeropage),
+            // ASL
+            0x0A | 0x06 | 0x16 | 0x0E | 0x1E => self.shift_left(instr.addr_mode, addr),
 
-            // LSR - zeropage,x
-            0x56 => self.shift_right(AddressMode::ZeropageX),
+            // ROR
+            0x6A | 0x66 | 0x76 | 0x6E | 0x7E => self.rotate_right(instr.addr_mode, addr),
 
-            // LSR - abs
-            0x4E => self.shift_right(AddressMode::Absolute),
+            // ROL
+            0x2A | 0x26 | 0x36 | 0x2E | 0x3E => self.rotate_left(instr.addr_mode, addr),
 
-            // LSR - abs,x
-            0x5E => self.shift_right(AddressMode::AbsoluteX),
-
-            // ASL - A
-            0x0A => self.shift_left(AddressMode::Accumulator),
-
-            // ASL - zpg
-            0x06 => self.shift_left(AddressMode::Zeropage),
-
-            // ASL - zpg,x
-            0x16 => self.shift_left(AddressMode::ZeropageX),
-
-            // ASL - abs
-            0x0E => self.shift_left(AddressMode::Absolute),
-
-            // ASL - abs,x
-            0x1E => self.shift_left(AddressMode::AbsoluteX),
-
-            // ROR - A
-            0x6A => self.rotate_right(AddressMode::Accumulator),
-
-            // ROR - zpg
-            0x66 => self.rotate_right(AddressMode::Zeropage),
-
-            // ROR - zpg,x
-            0x76 => self.rotate_right(AddressMode::ZeropageX),
-
-            // ROR - abs
-            0x6E => self.rotate_right(AddressMode::Absolute),
-
-            // ROR - abs,x
-            0x7E => self.rotate_right(AddressMode::AbsoluteX),
-
-            // ROL - A
-            0x2A => self.rotate_left(AddressMode::Accumulator),
-
-            // ROL - zpg
-            0x26 => self.rotate_left(AddressMode::Zeropage),
-
-            // ROL - zpg,x
-            0x36 => self.rotate_left(AddressMode::ZeropageX),
-
-            // ROL - abs
-            0x2E => self.rotate_left(AddressMode::Absolute),
-
-            // ROL - abs,x
-            0x3E => self.rotate_left(AddressMode::AbsoluteX),
-
-            // LDA - immediate
-            0xA9 => {
-                let value = self.load_u8_from_memory(AddressMode::Immediate);
+            // LDA
+            0xA9 | 0xA5 | 0xB5 | 0xAD | 0xB9 | 0xBD | 0xA1 | 0xB1 => {
+                let value = self.cpu_read_u8(addr);
                 self.set_register(value, RegType::A);
             }
 
-            // LDA - zeropage
-            0xA5 => {
-                let value = self.load_u8_from_memory(AddressMode::Zeropage);
-                self.set_register(value, RegType::A);
-            }
-
-            // LDA - zeropage,x
-            0xB5 => {
-                let value = self.load_u8_from_memory(AddressMode::ZeropageX);
-                self.set_register(value, RegType::A);
-            }
-
-            // LDA - absolute
-            0xAD => {
-                let value = self.load_u8_from_memory(AddressMode::Absolute);
-                self.set_register(value, RegType::A);
-            }
-
-            // LDA - absolute,Y
-            0xB9 => {
-                let value = self.load_u8_from_memory(AddressMode::AbsoluteY);
-                self.set_register(value, RegType::A);
-            }
-
-            // LDA - absolute,X
-            0xBD => {
-                let value = self.load_u8_from_memory(AddressMode::AbsoluteX);
-                self.set_register(value, RegType::A);
-            }
-
-            // LDA - indirect,x
-            0xA1 => {
-                let value = self.load_u8_from_memory(AddressMode::XIndirect);
-                self.set_register(value, RegType::A);
-            }
-
-            // LDA - indirect,Y
-            0xB1 => {
-                let value = self.load_u8_from_memory(AddressMode::IndirectY);
-                self.set_register(value, RegType::A);
-            }
-
-
-            // LDX-immediate
-            0xA2 => {
-                let value = self.load_u8_from_memory(AddressMode::Immediate);
+            // LDX
+            0xA2 | 0xAE | 0xBE | 0xA6 | 0xB6 => {
+                let value = self.cpu_read_u8(addr);
                 self.set_register(value, RegType::X);
             }
-
-            // LDX-absolute
-            0xAE => {
-                let value = self.load_u8_from_memory(AddressMode::Absolute);
-                self.set_register(value, RegType::X);
-            }
-
-            // LDX-absolute,Y
-            0xBE => {
-                let value = self.load_u8_from_memory(AddressMode::AbsoluteY);
-                self.set_register(value, RegType::X);
-            }
-
-            // LDX-zeropage
-            0xA6 => {
-                let value = self.load_u8_from_memory(AddressMode::Zeropage);
-                self.set_register(value, RegType::X);
-            }
-
-            // LDX-zeropage,y
-            0xB6 => {
-                let value = self.load_u8_from_memory(AddressMode::ZeropageY);
-                self.set_register(value, RegType::X);
-            }
-
 
             // LDY-immediate
-            0xA0 => {
-                let value = self.load_u8_from_memory(AddressMode::Immediate);
-                self.set_register(value, RegType::Y);
-            }
-
-            // LDY - zeropage
-            0xA4 => {
-                let value = self.load_u8_from_memory(AddressMode::Zeropage);
-                self.set_register(value, RegType::Y);
-            }
-
-            // LDY - absolute
-            0xAC => {
-                let value = self.load_u8_from_memory(AddressMode::Absolute);
-                self.set_register(value, RegType::Y);
-            }
-
-            // LDY - absolute,x
-            0xBC => {
-                let value = self.load_u8_from_memory(AddressMode::AbsoluteX);
-                self.set_register(value, RegType::Y);
-            }
-
-            // LDY - zeropage,X
-            0xB4 => {
-                let value = self.load_u8_from_memory(AddressMode::ZeropageX);
+            0xA0 | 0xA4 | 0xAC | 0xBC | 0xB4 => {
+                let value = self.cpu_read_u8(addr);
                 self.set_register(value, RegType::Y);
             }
 
@@ -336,266 +277,88 @@ impl CPU {
                 self.program_counter = value;
             }
 
-            // ORA - imm
-            0x09 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Immediate),
+            // ORA
+            0x09 | 0x05 | 0x15 | 0x01 | 0x11 | 0x0D | 0x19 | 0x1D =>
+                self.bitwise_op_to_a(|a, m| a | m, addr),
 
-            // ORA - zpg
-            0x05 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Zeropage),
+            // EOR
+            0x49 | 0x45 | 0x55 | 0x41 | 0x51 | 0x4D | 0x59 | 0x5D =>
+                self.bitwise_op_to_a(|a, m| a ^ m, addr),
 
-            // ORA - zpg,x
-            0x15 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::ZeropageX),
+            // AND
+            0x29 | 0x25 | 0x35 | 0x21 | 0x31 | 0x2D | 0x39 | 0x3D =>
+                self.bitwise_op_to_a(|a, m| a & m, addr),
 
-            // ORA - ind,x
-            0x01 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::XIndirect),
+            // ADC
+            0x69 | 0x65 | 0x75 | 0x61 | 0x71 | 0x6D | 0x79 | 0x7D =>
+                self.add_with_carry(addr),
 
-            // ORA - ind,y
-            0x11 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::IndirectY),
+            // SBC
+            0xE9 | 0xE5 | 0xF5 | 0xE1 | 0xF1 | 0xED | 0xF9 | 0xFD =>
+                self.sub_with_carry(addr),
 
-            // ORA - abs
-            0x0D => self.bitwise_op_to_a(|a, m| a | m, AddressMode::Absolute),
-
-            // ORA - abs,y
-            0x19 => self.bitwise_op_to_a(|a, m| a | m, AddressMode::AbsoluteY),
-
-            // ORA - abs,x
-            0x1D => self.bitwise_op_to_a(|a, m| a | m, AddressMode::AbsoluteX),
-
-            // EOR - imm
-            0x49 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Immediate),
-
-            // EOR - zpg
-            0x45 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Zeropage),
-
-            // EOR - zpg,x
-            0x55 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::ZeropageX),
-
-            // EOR - ind,x
-            0x41 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::XIndirect),
-
-            // EOR - ind,y
-            0x51 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::IndirectY),
-
-            // EOR - abs
-            0x4D => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::Absolute),
-
-            // EOR - abs,y
-            0x59 => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::AbsoluteY),
-
-            // EOR - abs,x
-            0x5D => self.bitwise_op_to_a(|a, m| a ^ m, AddressMode::AbsoluteX),
-
-            // ADC - imm
-            0x69 => self.add_with_carry(AddressMode::Immediate),
-
-            // ADC - zpg
-            0x65 => self.add_with_carry(AddressMode::Zeropage),
-
-            // ADC - zpg,x
-            0x75 => self.add_with_carry(AddressMode::ZeropageX),
-
-            // ADC - ind,x
-            0x61 => self.add_with_carry(AddressMode::XIndirect),
-
-            // ADC - ind,y
-            0x71 => self.add_with_carry(AddressMode::IndirectY),
-
-            // ADC - abs
-            0x6D => self.add_with_carry(AddressMode::Absolute),
-
-            // ADC - abs,y
-            0x79 => self.add_with_carry(AddressMode::AbsoluteY),
-
-            // ADC - abs,x
-            0x7D => self.add_with_carry(AddressMode::AbsoluteX),
-
-            // SBC - imm
-            0xE9 => self.sub_with_carry(AddressMode::Immediate),
-
-            // SBC - zpg
-            0xE5 => self.sub_with_carry(AddressMode::Zeropage),
-
-            // SBC - zpg,x
-            0xF5 => self.sub_with_carry(AddressMode::ZeropageX),
-
-            // SBC - ind,x
-            0xE1 => self.sub_with_carry(AddressMode::XIndirect),
-
-            // SBC - ind,y
-            0xF1 => self.sub_with_carry(AddressMode::IndirectY),
-
-            // SBC - abs
-            0xED => self.sub_with_carry(AddressMode::Absolute),
-
-            // SBC - abs,y
-            0xF9 => self.sub_with_carry(AddressMode::AbsoluteY),
-
-            // SBC - abs,x
-            0xFD => self.sub_with_carry(AddressMode::AbsoluteX),
-
-            // STX-zeropage
-            0x86 => {
+            // STX
+            0x86 | 0x96 | 0x8E => {
                 let tmp = self.index_x;
-                self.store_u8_in_memory(tmp, AddressMode::Zeropage);
+                self.cpu_write_u8(addr, tmp);
             }
 
-            // STX-zeropage,y
-            0x96 => {
-                let tmp = self.index_x;
-                self.store_u8_in_memory(tmp, AddressMode::ZeropageY);
-            }
-
-            // STX-absolute
-            0x8E => {
-                let tmp = self.index_x;
-                self.store_u8_in_memory(tmp, AddressMode::Absolute);
-            }
-
-            // STA-zeropage
-            0x85 => {
+            // STA
+            0x85 | 0x95 | 0x8D | 0x81 | 0x91 | 0x99 | 0x9D => {
                 let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::Zeropage);
-            }
-
-            // STA-zeropage,X
-            0x95 => {
-                let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::ZeropageX);
-            }
-
-            // STA-absolue
-            0x8D => {
-                let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::Absolute);
-            }
-
-            // STA-ind,x
-            0x81 => {
-                let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::XIndirect);
-            }
-
-            // STA-ind,y
-            0x91 => {
-                let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::IndirectY);
-            }
-
-            // STA-abs,y
-            0x99 => {
-                let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::AbsoluteY);
-            }
-
-            // STA-abs,x
-            0x9D => {
-                let tmp = self.accumulator;
-                self.store_u8_in_memory(tmp, AddressMode::AbsoluteX);
+                self.cpu_write_u8(addr, tmp);
             }
 
             // STY - zeropage
-            0x84 => {
+            0x84 | 0x94 | 0x8C => {
                 let tmp = self.index_y;
-                self.store_u8_in_memory(tmp, AddressMode::Zeropage);
-            }
-
-            // STY - zeropage,x
-            0x94 => {
-                let tmp = self.index_y;
-                self.store_u8_in_memory(tmp, AddressMode::ZeropageX);
-            }
-
-            // STY - absolute
-            0x8C => {
-                let tmp = self.index_y;
-                self.store_u8_in_memory(tmp, AddressMode::Absolute);
+                self.cpu_write_u8(addr, tmp);
             }
 
             // JSR-Absolute
             0x20 => {
-                let value = self.cpu_read_u16(self.program_counter);
-                self.program_counter += 1;
-
-                let hi = (self.program_counter >> 8) as u8;
+                let hi = ((self.program_counter - 1) >> 8) as u8;
                 self.push_stack(hi);
-                let lo = (0x00ff & self.program_counter) as u8;
+                let lo = (0x00ff & (self.program_counter - 1)) as u8;
                 self.push_stack(lo);
 
-                self.program_counter = value;
+                self.program_counter = instr.operand;
             }
 
-            // NOP // TODO: 2 cycles
-            0xEA => {} // println!("NOP"),
+            // RTS - implied
+            0x60 => {
+                let lo = self.pull_stack() as u16;
+                let hi = self.pull_stack() as u16;
+                let value: u16 = hi << 8 | lo;
+                self.program_counter = value + 1;
+            }
 
+            // NOP
+            0xEA => {}
+
+
+            // TAY - impl
             0xA8 => {
-                // TAY - impl
                 let tmp = self.accumulator;
                 self.set_register(tmp, RegType::Y);
             }
 
+            // TAX - impl
             0xAA => {
-                // TAX - impl
                 let tmp = self.accumulator;
                 self.set_register(tmp, RegType::X);
             }
 
+            // TYA - impl
             0x98 => {
-                // TYA - impl
                 let tmp = self.index_y;
                 self.set_register(tmp, RegType::A)
             }
 
+            // TXA - impl
             0x8A => {
-                // TXA - impl
                 let tmp = self.index_x;
                 self.set_register(tmp, RegType::A)
-            }
-
-            0xC8 => {
-                // INY - impl
-                let tmp = self.index_y.wrapping_add(1);
-                self.set_register(tmp, RegType::Y)
-            }
-
-            0x88 => {
-                // DEY - impl
-                let tmp = self.index_y.wrapping_sub(1);
-                self.set_register(tmp, RegType::Y)
-            }
-
-            0xE8 => {
-                // INX - impl
-                let tmp = self.index_x.wrapping_add(1);
-                self.set_register(tmp, RegType::X)
-            }
-
-            // INC - zeropage
-            0xE6 => self.increment_memory(AddressMode::Zeropage),
-
-            // INC - zeropage,x
-            0xF6 => self.increment_memory(AddressMode::ZeropageX),
-
-            // INC - absolute
-            0xEE => self.increment_memory(AddressMode::Absolute),
-
-            // INC - absolute,x
-            0xFE => self.increment_memory(AddressMode::AbsoluteX),
-
-            // DEC - zeropage
-            0xC6 => self.decrement_memory(AddressMode::Zeropage),
-
-            // DEC - zeropage,x
-            0xD6 => self.decrement_memory(AddressMode::ZeropageX),
-
-            // DEC - absolute
-            0xCE => self.decrement_memory(AddressMode::Absolute),
-
-            // DEC - absolute,x
-            0xDE => self.decrement_memory(AddressMode::AbsoluteX),
-
-            // DEX - impl
-            0xCA => {
-                let tmp = self.index_x.wrapping_sub(1);
-                self.set_register(tmp, RegType::X)
             }
 
             // TSX -impl
@@ -607,57 +370,44 @@ impl CPU {
             // TXS -impl
             0x9A => self.stack_pointer = self.index_x,
 
-            // BVC - relative - 2 bytes
-            0x50 => {
-                let tmp = !self.status_reg.overflow;
-                self.branch(tmp)
+            // INY - impl
+            0xC8 => {
+                let tmp = self.index_y.wrapping_add(1);
+                self.set_register(tmp, RegType::Y)
             }
 
-            0x70 => {
-                // BVS - relative - 2 bytes
-                let tmp = self.status_reg.overflow;
-                self.branch(tmp)
+            // INX - impl
+            0xE8 => {
+                let tmp = self.index_x.wrapping_add(1);
+                self.set_register(tmp, RegType::X)
             }
 
-            0xb0 => {
-                // BCS - relative - 2 bytes
-                let tmp = self.status_reg.carry;
-                self.branch(tmp)
+            // DEY - impl
+            0x88 => {
+                let tmp = self.index_y.wrapping_sub(1);
+                self.set_register(tmp, RegType::Y)
             }
 
-            0x90 => {
-                // BCC - relative - 2 bytes
-                let tmp = !self.status_reg.carry;
-                self.branch(tmp)
+            // DEX - impl
+            0xCA => {
+                let tmp = self.index_x.wrapping_sub(1);
+                self.set_register(tmp, RegType::X)
             }
 
-            0xf0 => {
-                // BEQ - relative
-                let tmp = self.status_reg.zero;
-                self.branch(tmp)
-            }
+            // INC
+            0xE6 | 0xF6 | 0xEE | 0xFE => self.increment_memory(addr),
 
-            0xd0 => {
-                // BNE - relative
-                let tmp = !self.status_reg.zero;
-                self.branch(tmp)
-            }
+            // DEC - zeropage
+            0xC6 | 0xD6 | 0xCE | 0xDE => self.decrement_memory(addr),
 
-            0x10 => {
-                // BPL - relative
-                let tmp = !self.status_reg.negative_sign;
-                self.branch(tmp)
-            }
+//          BVC  | BVS  | BCS  | BCC  | BEQ  | BNE  | BPL  | BMI
+            0x50 | 0x70 | 0xB0 | 0x90 | 0xF0 | 0xD0 | 0x10 | 0x30 =>
+                self.program_counter = addr,
 
-            0x30 => {
-                // BMI - rel
-                let tmp = self.status_reg.negative_sign;
-                self.branch(tmp)
-            }
 
-            0x24 => {
-                // BIT - zeropage
-                let value = self.load_u8_from_memory(AddressMode::Zeropage);
+            // BIT
+            0x24 | 0x2C => {
+                let value = self.cpu_read_u8(addr);
                 let result = self.accumulator & value;
                 //            println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
                 self.status_reg.zero = result == 0;
@@ -665,23 +415,6 @@ impl CPU {
                 self.status_reg.overflow = (value & (1 << 6)) != 0;
             }
 
-            0x2C => {
-                // BIT - absolute
-                let value = self.load_u8_from_memory(AddressMode::Absolute);
-                let result = self.accumulator & value;
-                //           println!("BIT {:#x} & {:#x}: {:#x}", self.accumulator, value, result);
-                self.status_reg.zero = result == 0;
-                self.status_reg.negative_sign = (value & (1 << 7)) != 0;
-                self.status_reg.overflow = (value & (1 << 6)) != 0;
-            }
-
-            0x60 => {
-                // RTS - implied
-                let lo = self.pull_stack() as u16;
-                let hi = self.pull_stack() as u16;
-                let value: u16 = hi << 8 | lo;
-                self.program_counter = value + 1;
-            }
 
             // SEI - impl
             0x78 => self.status_reg.interrupt_disable = true,
@@ -735,297 +468,86 @@ impl CPU {
                 self.push_stack(tmp);
             }
 
-            // AND - immediate
-            0x29 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Immediate),
 
-            // AND - zeropage
-            0x25 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Zeropage),
+            // CMP
+            0xC9 | 0xC5 | 0xD5 | 0xC1 | 0xD1 | 0xCD | 0xD9 | 0xDD =>
+                self.compare(RegType::A, addr),
 
-            // AND - zeropage,X
-            0x35 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::ZeropageX),
-
-            // AND - xindirect
-            0x21 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::XIndirect),
-
-            // AND - ind,y
-            0x31 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::IndirectY),
-
-            // AND absolute
-            0x2D => self.bitwise_op_to_a(|a, m| a & m, AddressMode::Absolute),
-
-            // AND absolute,y
-            0x39 => self.bitwise_op_to_a(|a, m| a & m, AddressMode::AbsoluteY),
-
-            // AND absolute,x
-            0x3D => self.bitwise_op_to_a(|a, m| a & m, AddressMode::AbsoluteX),
-
-            // CMP - immediate
-            0xC9 => self.compare(RegType::A, AddressMode::Immediate),
-
-            // CMP - zpg
-            0xC5 => self.compare(RegType::A, AddressMode::Zeropage),
-
-            // CMP - zpg,x
-            0xD5 => self.compare(RegType::A, AddressMode::ZeropageX),
-
-            // CMP - x,ind
-            0xC1 => self.compare(RegType::A, AddressMode::XIndirect),
-
-            // CMP - ind,y
-            0xD1 => self.compare(RegType::A, AddressMode::IndirectY),
-
-            // CMP - abs
-            0xCD => self.compare(RegType::A, AddressMode::Absolute),
-
-            // CMP - abs,y
-            0xD9 => self.compare(RegType::A, AddressMode::AbsoluteY),
-
-            // CMP - abs,x
-            0xDD => self.compare(RegType::A, AddressMode::AbsoluteX),
-
-            // CPY - immediate
-            0xC0 => self.compare(RegType::Y, AddressMode::Immediate),
-
-            // CPY - zpg
-            0xC4 => self.compare(RegType::Y, AddressMode::Zeropage),
-
-            // CPY - abs
-            0xCC => self.compare(RegType::Y, AddressMode::Absolute),
+            // CPY
+            0xC0 | 0xC4 | 0xCC => self.compare(RegType::Y, addr),
 
             // CPX - immediate
-            0xE0 => self.compare(RegType::X, AddressMode::Immediate),
+            0xE0 | 0xE4 | 0xEC => self.compare(RegType::X, addr),
 
-            // CPX - zpg
-            0xE4 => self.compare(RegType::X, AddressMode::Zeropage),
-
-            // CPX - abs
-            0xEC => self.compare(RegType::X, AddressMode::Absolute),
 
             // Illegal/undocumented opcodes - these do unusual things..
             //
             //
+
             // NOP - undocumented opcode
             0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => {} // println!("NOP - impl - ndocumented Opcode ${:X}", instr),
 
-            // DOP - Zeropage - undocumented Opcode
-            0x04 | 0x44 | 0x64 => {
-                //           println!("DOP zpg - undocumented Opcode ${:X}", instr);
-                self.program_counter += 1;
-            }
+            // DOP / NOP / SKB - undocumented Opcode
+            0x04 | 0x44 | 0x64 | 0x80 | 0x82 | 0x89 | 0xC2 | 0xE2 | 0x14 | 0x34 |
+            0x54 | 0x74 | 0xD4 | 0xF4 => {}
 
-            // DOP - immediate - undocumented Opcode
-            0x80 | 0x82 | 0x89 | 0xC2 | 0xE2 => {
-                //            println!("DOP imm - undocumented Opcode ${:X}", instr);
-                self.program_counter += 1;
-            }
-
-            // DOP / NOP / SKB - zeropage,X - Undocumented Opcode
-            0x14 | 0x34 | 0x54 | 0x74 | 0xD4 | 0xF4 => {
-                //           println!("DOP zpg,x - undocumented Opcode ${:X}", instr);
-                self.program_counter += 1;
-            }
-
-            // TOP - abs - Undocumented Opcode.
-            0x0C => {
-                //            println!("TOP abs - undocumented Opcode ${:X}", instr);
-                self.program_counter += 2;
-            }
-
-            // TOP / NOP / SKW - Abs,X - undocumented opcode
-            0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
-                // println!("TOP abs,x - undocumented Opcode ${:X}", instr);
-                // read the value and throw it away for cycle counting
-                self.load_u8_from_memory(AddressMode::AbsoluteX);
-            }
+            // TOP / NOP / SKW - undocumented opcode
+            0x0C | 0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {}
 
             // LAX - Ind,x - Undocumented Opcode
-            0xA3 => {
-                let value = self.load_u8_from_memory(AddressMode::XIndirect);
+            0xA3 | 0xB3 | 0xA7 | 0xB7 | 0xAF | 0xBF => {
+                let value = self.cpu_read_u8(addr);
                 self.set_register(value, RegType::A);
                 self.set_register(value, RegType::X);
             }
 
-            // LAX - Ind,y - Undocumented Opcode
-            0xB3 => {
-                let value = self.load_u8_from_memory(AddressMode::IndirectY);
-                self.set_register(value, RegType::A);
-                self.set_register(value, RegType::X);
-            }
-
-            // LAX - zpg - Undocumented Opcode
-            0xA7 => {
-                let value = self.load_u8_from_memory(AddressMode::Zeropage);
-                self.set_register(value, RegType::A);
-                self.set_register(value, RegType::X);
-            }
-
-            // LAX - zpg,y - Undocumented Opcode
-            0xB7 => {
-                let value = self.load_u8_from_memory(AddressMode::ZeropageY);
-                self.set_register(value, RegType::A);
-                self.set_register(value, RegType::X);
-            }
-
-            // LAX - abs - Undocumented Opcode
-            0xAF => {
-                let value = self.load_u8_from_memory(AddressMode::Absolute);
-                self.set_register(value, RegType::A);
-                self.set_register(value, RegType::X);
-            }
-
-            // LAX - abs,y - Undocumented Opcode
-            0xBF => {
-                let value = self.load_u8_from_memory(AddressMode::AbsoluteY);
-                self.set_register(value, RegType::A);
-                self.set_register(value, RegType::X);
-            }
-
-            // AAX / SAX / AXS - ind,x - Undocumented Opcode
-            0x83 => self.and_x_a_store(AddressMode::XIndirect),
-
-            // AAX / SAX / AXS - zpg - Undocumented Opcode
-            0x87 => self.and_x_a_store(AddressMode::Zeropage),
-
-            // AAX / SAX / AXS - zpg,y - Undocumented Opcode
-            0x97 => self.and_x_a_store(AddressMode::ZeropageY),
-
-            // AAX / SAX / AXS - abs - Undocumented Opcode
-            0x8F => self.and_x_a_store(AddressMode::Absolute),
+            // AAX / SAX / AXS - Undocumented Opcode
+            0x83 | 0x87 | 0x97 | 0x8F => self.and_x_a_store(addr),
 
             // SBC - imm - Undocumented opcode (identical to E9)
-            0xEB => self.sub_with_carry(AddressMode::Immediate),
+            0xEB => self.sub_with_carry(addr),
 
-            // DCP / DCM - zpg - Undocumented Opcode
-            0xC7 => self.dec_then_cmp(AddressMode::Zeropage),
+            // DCP / DCM - Undocumented Opcode
+            0xC7 | 0xD7 | 0xCF | 0xDF | 0xDB | 0xC3 | 0xD3 => {
+                self.decrement_memory(addr);
+                self.compare(RegType::A, addr);
+            }
 
-            // DCP / DCM - zpg,x - Undocumented Opcode
-            0xD7 => self.dec_then_cmp(AddressMode::ZeropageX),
+            // ISC / ISB / INS - undocumented
+            0xE7 | 0xF7 | 0xEF | 0xFF | 0xFB | 0xE3 | 0xF3 => {
+                self.increment_memory(addr);
+                self.sub_with_carry(addr);
+            }
 
-            // DCP / DCM - abs - Undocumented Opcode
-            0xCF => self.dec_then_cmp(AddressMode::Absolute),
+            // SLO / ASO - undocumented
+            0x07 | 0x17 | 0x0F | 0x1F | 0x1B | 0x03 | 0x13 => {
+                self.shift_left(instr.addr_mode, addr);
+                self.bitwise_op_to_a(|a, m| a | m, addr);
+            }
 
-            // DCP / DCM - abs,x - Undocumented Opcode
-            0xDF => self.dec_then_cmp(AddressMode::AbsoluteX),
+            // RLA - undocumented
+            0x27 | 0x37 | 0x2F | 0x3F | 0x3B | 0x23 | 0x33 => {
+                self.rotate_left(instr.addr_mode, addr);
+                self.bitwise_op_to_a(|a, m| a & m, addr);
+            }
 
-            // DCP / DCM - abs,y - Undocumented Opcode
-            0xDB => self.dec_then_cmp(AddressMode::AbsoluteY),
+            // SRE / LSE - undocumented
+            0x47 | 0x57 | 0x4F | 0x5F | 0x5B | 0x43 | 0x53 => {
+                self.shift_right(instr.addr_mode, addr);
+                self.bitwise_op_to_a(|a, m| a ^ m, addr);
+            }
 
-            // DCP / DCM - ind,x - Undocumented Opcode
-            0xC3 => self.dec_then_cmp(AddressMode::XIndirect),
-
-            // DCP / DCM - ind,y - Undocumented Opcode
-            0xD3 => self.dec_then_cmp(AddressMode::IndirectY),
-
-            // ISC / ISB / INS - zpg - undocumented
-            0xE7 => self.inc_then_sbc(AddressMode::Zeropage),
-
-            // ISC / ISB / INS - zpg,x - undocumented
-            0xF7 => self.inc_then_sbc(AddressMode::ZeropageX),
-
-            // ISC / ISB / INS - abs - undocumented
-            0xEF => self.inc_then_sbc(AddressMode::Absolute),
-
-            // ISC / ISB / INS - abs,x - undocumented
-            0xFF => self.inc_then_sbc(AddressMode::AbsoluteX),
-
-            // ISC / ISB / INS - abs,y - undocumented
-            0xFB => self.inc_then_sbc(AddressMode::AbsoluteY),
-
-            // ISC / ISB / INS - ind,x - undocumented
-            0xE3 => self.inc_then_sbc(AddressMode::XIndirect),
-
-            // ISC / ISB / INS - ind,y - undocumented
-            0xF3 => self.inc_then_sbc(AddressMode::IndirectY),
-
-            // SLO / ASO - zpg - undocumented
-            0x07 => self.asl_then_ora(AddressMode::Zeropage),
-
-            // SLO / ASO - zpg,x - undocumented
-            0x17 => self.asl_then_ora(AddressMode::ZeropageX),
-
-            // SLO / ASO - abs - undocumented
-            0x0F => self.asl_then_ora(AddressMode::Absolute),
-
-            // SLO / ASO - abs,x - undocumented
-            0x1F => self.asl_then_ora(AddressMode::AbsoluteX),
-
-            // SLO / ASO - abs,y - undocumented
-            0x1B => self.asl_then_ora(AddressMode::AbsoluteY),
-
-            // SLO / ASO - ind,x - undocumented
-            0x03 => self.asl_then_ora(AddressMode::XIndirect),
-
-            // SLO / ASO - ind,y - undocumented
-            0x13 => self.asl_then_ora(AddressMode::IndirectY),
-
-            // RLA - zpg - undocumented
-            0x27 => self.rol_then_and(AddressMode::Zeropage),
-
-            // RLA - zpg,x - undocumented
-            0x37 => self.rol_then_and(AddressMode::ZeropageX),
-
-            // RLA - abs - undocumented
-            0x2F => self.rol_then_and(AddressMode::Absolute),
-
-            // RLA - abs,x - undocumented
-            0x3F => self.rol_then_and(AddressMode::AbsoluteX),
-
-            // RLA - abs,y - undocumented
-            0x3B => self.rol_then_and(AddressMode::AbsoluteY),
-
-            // RLA - ind,x - undocumented
-            0x23 => self.rol_then_and(AddressMode::XIndirect),
-
-            // RLA - ind,y - undocumented
-            0x33 => self.rol_then_and(AddressMode::IndirectY),
-
-            // SRE / LSE - zpg - undocumented
-            0x47 => self.lsr_then_eor(AddressMode::Zeropage),
-
-            // SRE / LSE - zpg,x - undocumented
-            0x57 => self.lsr_then_eor(AddressMode::ZeropageX),
-
-            // SRE / LSE - abs - undocumented
-            0x4F => self.lsr_then_eor(AddressMode::Absolute),
-
-            // SRE / LSE - abs,x - undocumented
-            0x5F => self.lsr_then_eor(AddressMode::AbsoluteX),
-
-            // SRE / LSE - abs,y - undocumented
-            0x5B => self.lsr_then_eor(AddressMode::AbsoluteY),
-
-            // SRE / LSE - ind,x - undocumented
-            0x43 => self.lsr_then_eor(AddressMode::XIndirect),
-
-            // SRE / LSE - ind,y - undocumented
-            0x53 => self.lsr_then_eor(AddressMode::IndirectY),
-
-            // RRA - zpg - undocumented
-            0x67 => self.ror_then_adc(AddressMode::Zeropage),
-
-            // RRA - zpg,x - undocumented
-            0x77 => self.ror_then_adc(AddressMode::ZeropageX),
-
-            // RRA - abs - undocumented
-            0x6F => self.ror_then_adc(AddressMode::Absolute),
-
-            // RRA - abs,x - undocumented
-            0x7F => self.ror_then_adc(AddressMode::AbsoluteX),
-
-            // RRA - abs,y - undocumented
-            0x7B => self.ror_then_adc(AddressMode::AbsoluteY),
-
-            // RRA - ind,x - undocumented
-            0x63 => self.ror_then_adc(AddressMode::XIndirect),
-
-            // RRA - ind,y - undocumented
-            0x73 => self.ror_then_adc(AddressMode::IndirectY),
+            // RRA - undocumented
+            0x67 | 0x77 | 0x6F | 0x7F | 0x7B | 0x63 | 0x73 => {
+                self.rotate_right(instr.addr_mode, addr);
+                self.add_with_carry(addr);
+            },
 
             // BRK
             0x00 => {
                 self.status_reg.break_flag = true;
 
-                self.program_counter += 1;
+//                self.program_counter += 1;
                 self.status_reg.interrupt_disable = true;
                 let hi = (self.program_counter >> 8) as u8;
                 self.push_stack(hi);
@@ -1038,91 +560,22 @@ impl CPU {
                 self.program_counter = tmp;
             }
 
-            _ => panic!("The opcode: {:#x} is unrecognized", instr),
-        }
-    }
-
-    // All of the XXX then YYY instructions are undocumented opcodes
-    // They usually have a hack for static cycle counts by resetting the cycle
-    // count at the end of both insturctions
-    // normally abs,x/y and ind,y have an extra cycle for page boundary
-    // but not on the undocumented ones for some reason
-
-
-    fn ror_then_adc(&mut self, addr_mode: AddressMode) {
-        let tmp = self.cycle;
-        self.rotate_right(addr_mode);
-        self.reset_pc_for_double_op(addr_mode);
-        self.add_with_carry(addr_mode);
-        self.cycle = tmp;
-    }
-
-    fn lsr_then_eor(&mut self, addr_mode: AddressMode) {
-        let tmp = self.cycle;
-        self.shift_right(addr_mode);
-        self.reset_pc_for_double_op(addr_mode);
-        self.bitwise_op_to_a(|a, m| a ^ m, addr_mode);
-        self.cycle = tmp;
-    }
-
-    fn rol_then_and(&mut self, addr_mode: AddressMode) {
-        let tmp = self.cycle;
-        self.rotate_left(addr_mode);
-        self.reset_pc_for_double_op(addr_mode);
-        self.bitwise_op_to_a(|a, m| a & m, addr_mode);
-        self.cycle = tmp;
-    }
-
-    fn asl_then_ora(&mut self, addr_mode: AddressMode) {
-        let tmp = self.cycle;
-        self.shift_left(addr_mode);
-        self.reset_pc_for_double_op(addr_mode);
-        self.bitwise_op_to_a(|a, m| a | m, addr_mode);
-        self.cycle = tmp;
-    }
-
-    fn dec_then_cmp(&mut self, addr_mode: AddressMode) {
-        let tmp = self.cycle;
-        self.decrement_memory(addr_mode);
-        self.reset_pc_for_double_op(addr_mode);
-        self.compare(RegType::A, addr_mode);
-        self.cycle = tmp;
-    }
-
-    // ISB
-    fn inc_then_sbc(&mut self, addr_mode: AddressMode) {
-        let tmp = self.cycle;
-        self.increment_memory(addr_mode);
-        self.reset_pc_for_double_op(addr_mode);
-        self.sub_with_carry(addr_mode);
-        self.cycle = tmp;
-    }
-
-    fn reset_pc_for_double_op(&mut self, addr_mode: AddressMode) {
-        if addr_mode == AddressMode::Absolute || addr_mode == AddressMode::AbsoluteX ||
-           addr_mode == AddressMode::AbsoluteY {
-            self.program_counter -= 2;
-        } else {
-            self.program_counter -= 1;
+            _ => panic!("The opcode: {:#x} is unrecognized", op),
         }
     }
 
     // does NOT effect flags
-    fn and_x_a_store(&mut self, addr_mode: AddressMode) {
+    fn and_x_a_store(&mut self, addr: u16) {
         let value = self.index_x & self.accumulator;
-        self.store_u8_in_memory(value, addr_mode)
+        self.cpu_write_u8(addr, value)
     }
 
-    fn rotate_right(&mut self, addr_mode: AddressMode) {
-        let value: u8;
-        let addr: u16;
-        if addr_mode == AddressMode::Accumulator {
-            value = self.accumulator;
-            addr = 0;
+    fn rotate_right(&mut self, addr_mode: AddressMode, addr: u16) {
+        let value = if addr_mode == AddressMode::Accumulator {
+            self.accumulator
         } else {
-            addr = self.memory_lookup(addr_mode, false) as u16;
-            value = self.cpu_read_u8(addr);
-        }
+            self.cpu_read_u8(addr)
+        };
 
         let c = if self.status_reg.carry {
             1
@@ -1141,16 +594,12 @@ impl CPU {
         }
     }
 
-    fn rotate_left(&mut self, addr_mode: AddressMode) {
-        let value: u8;
-        let addr: u16;
-        if addr_mode == AddressMode::Accumulator {
-            value = self.accumulator;
-            addr = 0;
+    fn rotate_left(&mut self, addr_mode: AddressMode, addr: u16) {
+        let value = if addr_mode == AddressMode::Accumulator {
+            self.accumulator
         } else {
-            addr = self.memory_lookup(addr_mode, false) as u16;
-            value = self.cpu_read_u8(addr);
-        }
+            self.cpu_read_u8(addr)
+        };
 
         let c = if self.status_reg.carry {
             1
@@ -1169,16 +618,12 @@ impl CPU {
         }
     }
 
-    fn shift_right(&mut self, addr_mode: AddressMode) {
-        let value: u8;
-        let addr: u16;
-        if addr_mode == AddressMode::Accumulator {
-            value = self.accumulator;
-            addr = 0;
+    fn shift_right(&mut self, addr_mode: AddressMode, addr: u16) {
+        let value = if addr_mode == AddressMode::Accumulator {
+            self.accumulator
         } else {
-            addr = self.memory_lookup(addr_mode, false) as u16;
-            value = self.cpu_read_u8(addr);
-        }
+            self.cpu_read_u8(addr)
+        };
 
         self.status_reg.carry = (value & (1 << 0)) != 0;
         let value = value >> 1;
@@ -1192,16 +637,12 @@ impl CPU {
         }
     }
 
-    fn shift_left(&mut self, addr_mode: AddressMode) {
-        let value: u8;
-        let addr: u16;
-        if addr_mode == AddressMode::Accumulator {
-            value = self.accumulator;
-            addr = 0;
+    fn shift_left(&mut self, addr_mode: AddressMode, addr: u16) {
+        let value = if addr_mode == AddressMode::Accumulator {
+            self.accumulator
         } else {
-            addr = self.memory_lookup(addr_mode, false) as u16;
-            value = self.cpu_read_u8(addr);
-        }
+            self.cpu_read_u8(addr)
+        };
 
         self.status_reg.carry = (value & (1 << 7)) != 0;
         let value = ((value as u16) << 1) as u8;
@@ -1215,18 +656,18 @@ impl CPU {
         }
     }
 
-    fn bitwise_op_to_a<F>(&mut self, f: F, addr_mode: AddressMode)
+    fn bitwise_op_to_a<F>(&mut self, f: F, addr: u16)
         where F: FnOnce(u8, u8) -> u8
     {
 
-        let m = self.load_u8_from_memory(addr_mode);
+        let m = self.cpu_read_u8(addr);
         let a = self.accumulator;
         let value = f(a, m);
         self.set_register(value, RegType::A);
     }
 
-    fn add_with_carry(&mut self, addr_mode: AddressMode) {
-        let value = self.load_u8_from_memory(addr_mode) as u16;
+    fn add_with_carry(&mut self, addr: u16) {
+        let value = self.cpu_read_u8(addr) as u16;
         let a = self.accumulator as u16;
         let c = if self.status_reg.carry {
             1
@@ -1241,9 +682,9 @@ impl CPU {
         self.set_register(result as u8, RegType::A);
     }
 
-    // impl as binary add with 1s compliment of the value being sub from A
-    fn sub_with_carry(&mut self, addr_mode: AddressMode) {
-        let value = self.load_u8_from_memory(addr_mode) as u16;
+    // implemented as binary add with 1s(ones) compliment of the value being sub from A
+    fn sub_with_carry(&mut self, addr: u16) {
+        let value = self.cpu_read_u8(addr) as u16;
         let a = self.accumulator as u16;
         let c = if self.status_reg.carry {
             1
@@ -1252,15 +693,13 @@ impl CPU {
         };
 
         let result = a + (0xff - value) + c;
-        // TODO: debug
         // println!("SBC: A{:#X} + (0xff-M{:#X}) + C{:#X} = {:X}", a, value, c, result);
         self.status_reg.carry = result > 0xff;
         self.status_reg.overflow = ((a ^ result) & ((0xff - value) ^ result) & 0x80) != 0;
         self.set_register(result as u8, RegType::A);
     }
 
-    fn increment_memory(&mut self, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode, false) as u16;
+    fn increment_memory(&mut self, addr: u16) {
         let mut value = self.cpu_read_u8(addr);
         value = value.wrapping_add(1);
         self.status_reg.zero = value == 0;
@@ -1268,8 +707,7 @@ impl CPU {
         self.cpu_write_u8(addr, value);
     }
 
-    fn decrement_memory(&mut self, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode, false) as u16;
+    fn decrement_memory(&mut self, addr: u16) {
         let mut value = self.cpu_read_u8(addr);
         value = value.wrapping_sub(1);
         self.status_reg.zero = value == 0;
@@ -1277,13 +715,13 @@ impl CPU {
         self.cpu_write_u8(addr, value);
     }
 
-    fn compare(&mut self, reg: RegType, addr_mode: AddressMode) {
+    fn compare(&mut self, reg: RegType, addr: u16) {
         let register = match reg {
             RegType::A => self.accumulator as i16,
             RegType::Y => self.index_y as i16,
             RegType::X => self.index_x as i16,
         };
-        let value = self.load_u8_from_memory(addr_mode) as i16;
+        let value = self.cpu_read_u8(addr) as i16;
         //        println!("CMY {:#X} - {:#X}", register, value);
         let result = (register - value) as u8;
         self.status_reg.zero = register == value;
@@ -1291,6 +729,7 @@ impl CPU {
         self.status_reg.carry = register >= value;
     }
 
+    /*
     // All branch functions seem to be identical
     // I have no idea what happens if it under/overflows
     // maybe should be wrapping
@@ -1417,6 +856,8 @@ impl CPU {
         // TODO:: debugger
         // println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
     }
+*/
+
 
     // setting the accumulator always sets N and Z appropriately
     fn set_register(&mut self, value: u8, reg: RegType) {

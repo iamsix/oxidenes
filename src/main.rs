@@ -2,7 +2,6 @@ extern crate sdl2;
 extern crate time;
 
 use sdl2::pixels::PixelFormatEnum;
-use sdl2::rect::Rect;
 use sdl2::keyboard::Keycode;
 use sdl2::event::{Event,WindowEventId};
 
@@ -18,8 +17,12 @@ mod apu;
 mod ppu;
 mod opcodes;
 
+use opcodes::AddressMode;
+
 use mem_map::*;
 // use cpu::RunCondition;
+
+const PPU_MULTIPLIER:isize = 3;
 
 pub struct Bus {
     ram: Box<[u8]>,
@@ -65,39 +68,34 @@ fn main() {
 
     // let mut ticks = 0;
     // TODO: re-add specific run conditions for debugging
+    println!("start time is {}", time::precise_time_ns());
+
     let mut nmi = false;
     'main: loop {
 
-        let pc = cpu.program_counter;
-        let instr = cpu.cpu_read_u8(pc);
+        let (op, instr) = cpu.read_instruction();
 
-/*
+
         // TODO: Move this to a specific debug output
-if cpu.bus.ppu.framecount == 21 || cpu.bus.ppu.framecount == 22 {
-        let tmp: u8 = cpu.status_reg.into();
-        print!("{:#X}  I:{:02X}                  A:{:02X} X:{:02X} Y:{:02X}  P:{:02X}  \
-                  SP:{:02X} CYC:{:>3} SL:{:} \r\n",
-                 cpu.program_counter,
-                 instr,
-                 cpu.accumulator,
-                 cpu.index_x,
-                 cpu.index_y,
-                 tmp,
-                 cpu.stack_pointer,
-                 cpu.cycle % 341,
-                 cpu.bus.ppu.scanline,
-                 ); //, self.status_reg);
-}
-*/
+        let debug = false;
+        if debug {
+            cpu_debug(&op, &instr, &cpu);
+        }
 
-        cpu.cycle = cpu.cycle + (cpu::TIMING[instr as usize] * cpu::PPU_MULTIPLIER);
+        cpu.cycle += instr.ticks as isize * PPU_MULTIPLIER;
 
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
             nmi = cpu.bus.ppu.render_scanline();
         }
-        cpu.execute_op(instr);
+        if !cpu.bus.ppu.sprite0_hit &&
+            cpu.bus.ppu.sprite0_dot != 0xFF &&
+            cpu.cycle > cpu.bus.ppu.sprite0_dot as isize
+        {
+            cpu.bus.ppu.sprite0_hit = true;
+        }
 
+        cpu.execute_op(op, instr);
         // If the cycle count isn't > 1 yet
         // then the vblank flag wouldn't have been set at this point
         // since vblank is set on dot 1 of line 341
@@ -105,6 +103,7 @@ if cpu.bus.ppu.framecount == 21 || cpu.bus.ppu.framecount == 22 {
             cpu.nmi();
             nmi = false;
         }
+
 
 
         if cpu.bus.ppu.scanline == 240 {
@@ -132,7 +131,7 @@ if cpu.bus.ppu.framecount == 21 || cpu.bus.ppu.framecount == 22 {
                         // panic!("Works..");
                         cpu.joy1 |= 1 << 0;
                     }
-                    Keycode::LAlt => {
+                    Keycode::LShift => {
                         cpu.joy1 |= 1 << 1;
                     }
                     Keycode::Space => {
@@ -162,7 +161,87 @@ if cpu.bus.ppu.framecount == 21 || cpu.bus.ppu.framecount == 22 {
 
     }
 
+    println!("start time is {}", time::precise_time_ns());
 }
+
+
+fn cpu_debug (op: &u8, instr: &opcodes::Instruction, cpu: &cpu::CPU) {
+    let pc = cpu.program_counter - instr.bytes as u16;
+    let operand = if instr.bytes != 1 {
+        // opr = instr.operand.unwrap();
+        if instr.operand > 0xFF {
+            let opr1 = instr.operand & 0xFF;
+            let opr2 = instr.operand >> 8;
+            format!("{:02X} {:02X}", opr1 as u8, opr2 as u8)
+        } else {
+            format!("{:02X}   ", instr.operand as u8)
+        }
+    } else {
+        format!("     ")
+    };
+
+    let addrs = if instr.dest_addr != None {
+        let addr = instr.dest_addr.unwrap();
+        let value = if addr < 0x800 {
+            format!(" = {:02X}", cpu.bus.ram[addr as usize])
+        } else {
+            format!("")
+        };
+        match instr.addr_mode {
+            AddressMode::Immediate => format!("#${:02X}", instr.operand as u8),
+            AddressMode::Absolute => format!("${:04X}{}", addr, value),
+            AddressMode::AbsoluteX => format!("${:04X},X @ {:04X}{}", instr.operand,
+                                                                      addr,
+                                                                      value),
+            AddressMode::AbsoluteY => format!("${:04X},Y @ {:04X}{}", instr.operand,
+                                                                      addr,
+                                                                      value),
+            AddressMode::XIndirect => {
+                format!("(${:02X},X) @ {:02X} = {:04X}{}", instr.operand,
+                                                            instr.operand.wrapping_add(cpu.index_x as u16),
+                                                            addr,
+                                                            value)
+            }
+            AddressMode::IndirectY => {
+                format!("(${:02X}),Y = {:04X} @ {:04X}{}", instr.operand,
+                                                            addr.wrapping_sub(cpu.index_y as u16),
+                                                            addr,
+                                                            value)
+            }
+            AddressMode::Zeropage => format!("${:02X}{}", addr as u8, value),
+            AddressMode::ZeropageX => format!("${:02X},X @ {:02X}{}", instr.operand,
+                                                                        addr,
+                                                                        value),
+            AddressMode::ZeropageY => format!("${:02X},Y @ {:02X}{}", instr.operand,
+                                                                        addr,
+                                                                        value),
+            AddressMode::Indirect => format!("(${:04X}) = {:04X}", instr.operand, addr),
+            AddressMode::Relative => format!("${:04X}", (cpu.program_counter as i16 +
+                                                        instr.operand as i8 as i16) as u16),
+            _ => format!(""),
+        }
+    } else {
+        format!("")
+    };
+    let tmp: u8 = cpu.status_reg.into();
+    print!("{:04X}  {:02X} {} {:>4} {:<27} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} \
+              SP:{:02X} CYC:{:>3} SL:{:} \r\n",
+             pc,
+             op,
+             operand,
+             instr.name,
+             addrs,
+             cpu.accumulator,
+             cpu.index_x,
+             cpu.index_y,
+             tmp,
+             cpu.stack_pointer,
+             cpu.cycle % 341,
+             cpu.bus.ppu.scanline,
+             ); //, self.status_reg);
+
+}
+
 
 fn render_frame(screen: &[[u32; 256]; 240],
                 renderer: &mut sdl2::render::Renderer,
