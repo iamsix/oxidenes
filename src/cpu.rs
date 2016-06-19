@@ -144,13 +144,13 @@ impl CPU {
                     // BVS - relative - 2 bytes
                     0x70 => self.status_reg.overflow,
                     // BCS - relative - 2 bytes
-                    0xb0 => self.status_reg.carry,
+                    0xB0 => self.status_reg.carry,
                     // BCC - relative - 2 bytes
                     0x90 => !self.status_reg.carry,
                     // BEQ - relative
-                    0xf0 => self.status_reg.zero,
+                    0xF0 => self.status_reg.zero,
                     // BNE - relative
-                    0xd0 => !self.status_reg.zero,
+                    0xD0 => !self.status_reg.zero,
                     // BPL - relative
                     0x10 => !self.status_reg.negative_sign,
                     // BMI - rel
@@ -164,7 +164,7 @@ impl CPU {
                 if branching {
                     let tmp = operand.unwrap() as i8 as i16;
                     let addr = (self.program_counter as i16 + tmp) as u16;
-                    if addr >> 8 != (self.program_counter + 1) >> 8 {
+                    if addr >> 8 != (self.program_counter) >> 8 {
                         page_crossed = true;
                     };
                     Some(addr)
@@ -185,6 +185,7 @@ impl CPU {
         if page_crossed {
             instr.ticks += 1;
         }
+
         if branching {
             instr.ticks += 1;
         }
@@ -209,11 +210,11 @@ impl CPU {
     }
 
 
-    pub fn execute_op(&mut self, op: u8, instr: Instruction) {
+    pub fn execute_op(&mut self, op: &u8, instr: &Instruction) {
 
         let addr = instr.dest_addr.unwrap_or(0);
         // self.program_counter += 1;
-        match op {
+        match *op {
 
             0x4C => {
                 // JMP-absolute
@@ -729,136 +730,6 @@ impl CPU {
         self.status_reg.carry = register >= value;
     }
 
-    /*
-    // All branch functions seem to be identical
-    // I have no idea what happens if it under/overflows
-    // maybe should be wrapping
-    fn branch(&mut self, condition: bool) {
-        if condition {
-            self.cycle += 1 * PPU_MULTIPLIER;
-            let value = self.load_u8_from_memory(AddressMode::Immediate) as i8;
-            //            println!("Branch: PC:{:#X} + {:}", self.program_counter, value);
-            //let tmp = (self.program_counter as i16 + value as i16) as u16;
-            let tmp = (self.program_counter as i16 + value as i16) as u16;
-            if tmp >> 8 != (self.program_counter + 1) >> 8 {
-                self.cycle += 1 * PPU_MULTIPLIER;
-            };
-            self.program_counter = tmp as u16;
-        } else {
-            self.program_counter += 1;
-        }
-    }
-
-    fn memory_lookup(&mut self, addr_mode: AddressMode, page_check: bool) -> u16 {
-        match addr_mode {
-            AddressMode::Immediate => {
-                self.program_counter += 1;
-                self.program_counter - 1
-            }
-            AddressMode::Zeropage => {
-                let pc = self.program_counter;
-                let tmp = self.cpu_read_u8(pc);
-                self.program_counter += 1;
-                tmp as u16
-            }
-
-            AddressMode::ZeropageX => self.zeropage_xy(RegType::X),
-            AddressMode::ZeropageY => self.zeropage_xy(RegType::Y),
-            AddressMode::Absolute => {
-                let tmp = self.cpu_read_u16(self.program_counter);
-                self.program_counter += 2;
-                tmp
-            }
-            AddressMode::AbsoluteX => self.absolute_xy(RegType::X, page_check),
-            AddressMode::AbsoluteY => self.absolute_xy(RegType::Y, page_check),
-            AddressMode::XIndirect => self.x_indirect(),
-            AddressMode::IndirectY => self.indirect_y(page_check),
-
-            _ => panic!("memory_lookup doesn't work on {:?}", addr_mode),
-        }
-    }
-
-    fn load_u8_from_memory(&mut self, addr_mode: AddressMode) -> u8 {
-        let mut page_check = false;
-        if addr_mode == AddressMode::AbsoluteX ||
-           addr_mode == AddressMode::AbsoluteY ||
-           addr_mode == AddressMode::IndirectY
-        {
-            page_check = true;
-        }
-        if addr_mode == AddressMode::Accumulator {
-            return self.accumulator
-        } else {
-            let addr = self.memory_lookup(addr_mode, page_check);
-            self.cpu_read_u8(addr)
-        }
-    }
-
-    fn store_u8_in_memory(&mut self, value: u8, addr_mode: AddressMode) {
-        let addr = self.memory_lookup(addr_mode, false);
-        self.cpu_write_u8(addr, value);
-    }
-
-    fn x_indirect(&mut self) -> u16 {
-        let pc = self.program_counter;
-        let mut tmp = self.cpu_read_u8(pc);
-        self.program_counter += 1;
-        tmp = tmp.wrapping_add(self.index_x);
-        let lo = self.cpu_read_u8(tmp as u16) as u16;
-        let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
-        hi << 8 | lo
-    }
-
-    fn zeropage_xy(&mut self, reg: RegType) -> u16 {
-        let pc = self.program_counter;
-        let tmp = self.cpu_read_u8(pc);
-        self.program_counter += 1;
-        match reg {
-            RegType::X => tmp.wrapping_add(self.index_x) as u16,
-            RegType::Y => tmp.wrapping_add(self.index_y) as u16,
-            _ => panic!("can not zpg,A"),
-        }
-    }
-
-    // afaik I can ignore 'with carry' in the description because I'm using a u16
-    // I'm assuming the addr would wrap here.. no idea
-    fn absolute_xy(&mut self, reg: RegType, page_check: bool) -> u16 {
-        let tmp = self.cpu_read_u16(self.program_counter);
-        self.program_counter += 2;
-        let result = match reg {
-            RegType::X => tmp.wrapping_add(self.index_x as u16),
-            RegType::Y => tmp.wrapping_add(self.index_y as u16),
-            _ => panic!("can not abs,A"),
-        };
-
-         if page_check && (tmp >> 8 != result >> 8) {
-                self.cycle += 1 * PPU_MULTIPLIER;
-         }
-        // TODO: Debugger
-        // println!("Load abs,{:?} is {:#X} + X:{:#X} or Y:{:#X} = {:#X}",
-        //          reg, tmp,self.index_x, self.index_y, result);
-        result
-    }
-
-    fn indirect_y(&mut self, page_check: bool) -> u16 {
-        let pc = self.program_counter;
-        let tmp = self.cpu_read_u8(pc); // zpg addr
-        self.program_counter += 1;
-        let lo = self.cpu_read_u8(tmp as u16) as u16;
-        let hi = self.cpu_read_u8(tmp.wrapping_add(1) as u16) as u16;
-        let value: u16 = hi << 8 | lo;
-        // println!("IndirectY address is {:#X}", value);
-        let result = value.wrapping_add(self.index_y as u16);
-        if page_check && (hi != result >> 8) {
-            self.cycle += 1 * PPU_MULTIPLIER;
-        }
-        result
-        // TODO:: debugger
-        // println!("Load ind,Y is {:#X} + {:#X} = {:#X}", value, self.index_y, result);
-    }
-*/
-
-
     // setting the accumulator always sets N and Z appropriately
     fn set_register(&mut self, value: u8, reg: RegType) {
         self.status_reg.zero = value == 0;
@@ -883,8 +754,11 @@ impl CPU {
         self.cpu_read_u8(tmp)
     }
 
-    pub fn cpu_read_u8(&mut self, addr: u16) -> u8 {
+    pub fn cpu_read_u8(&mut self, mut addr: u16) -> u8 {
         // println!("Read {:#X}", addr);
+        if addr > 0x2007 && addr < 0x4000 {
+            addr = 0x2000 + ((addr - 0x2000) % 8)
+        }
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
@@ -892,6 +766,7 @@ impl CPU {
                 self.bus.ram[addr as usize]
             }
 
+            PPUMASK => self.bus.ppu.lastwrite,
             PPUSTATUS => self.bus.ppu.read_ppustatus(),
             PPUDATA => self.bus.ppu.read_ppudata(),
             OAMDATA => self.bus.ppu.read_oamdata(),
@@ -909,10 +784,11 @@ impl CPU {
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored
-                panic!("Expansion rom is unimplemented")
+                // panic!("Expansion rom is unimplemented {:#X}", addr)
+                0
             }
 
-            SRAM_START...SRAM_END => panic!("SRAM is unimplemented"),
+            SRAM_START...SRAM_END => 0,// panic!("SRAM is unimplemented {:#X}", addr),
 
             PRG_ROM_START...PRG_ROM_END => self.bus.cart.read_cart_u8(addr),
 

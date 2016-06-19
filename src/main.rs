@@ -87,15 +87,17 @@ fn main() {
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
             nmi = cpu.bus.ppu.render_scanline();
+
         }
+        cpu.execute_op(&op, &instr);
+
+
         if !cpu.bus.ppu.sprite0_hit &&
             cpu.bus.ppu.sprite0_dot != 0xFF &&
             cpu.cycle > cpu.bus.ppu.sprite0_dot as isize
         {
             cpu.bus.ppu.sprite0_hit = true;
         }
-
-        cpu.execute_op(op, instr);
         // If the cycle count isn't > 1 yet
         // then the vblank flag wouldn't have been set at this point
         // since vblank is set on dot 1 of line 341
@@ -220,12 +222,14 @@ fn cpu_debug (op: &u8, instr: &opcodes::Instruction, cpu: &cpu::CPU) {
                                                         instr.operand as i8 as i16) as u16),
             _ => format!(""),
         }
+    } else if instr.addr_mode == AddressMode::Accumulator {
+        format!("A")
     } else {
         format!("")
     };
     let tmp: u8 = cpu.status_reg.into();
     print!("{:04X}  {:02X} {} {:>4} {:<27} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} \
-              SP:{:02X} CYC:{:>3} SL:{:} \r\n",
+              SP:{:02X} CYC:{:>3} SL:{:}\r\n",
              pc,
              op,
              operand,

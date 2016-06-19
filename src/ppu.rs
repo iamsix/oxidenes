@@ -61,7 +61,7 @@ pub struct PPU {
     vram: Box<[u8]>,
     chr: cart::ChrRom,
 
-    lastwrite: u8,
+    pub lastwrite: u8,
     ppudata_buffer: u8,
     initial_reset: bool,
     nmi_generated: bool,
@@ -292,7 +292,7 @@ impl PPU {
         }
     }
 
-    fn read_data(&mut self, addr: u16) -> u8 {
+    fn read_data(&self, addr: u16) -> u8 {
 //        println!("read from {:#X}", addr);
         match addr {
             0x0000...0x1FFF => self.chr.read_u8(addr),
@@ -370,7 +370,8 @@ impl PPU {
         };
 
         for col in 0..endcol {
-            let coarsex = self.vram_addr & 0x001F;
+            let coarsex = self.vram_addr & 0x1F;
+            let coarsey = (self.vram_addr >> 5) & 0x1F;
 
             let att_tbl_addr = 0x23C0 |
                                 (self.vram_addr & 0x0C00) |
@@ -378,10 +379,10 @@ impl PPU {
                                 ((self.vram_addr >> 2) & 0x07);
 
             // TODO need to offset attr table with fine_x
-            let attr_table = self.read_data(att_tbl_addr);
+            let attr_table = &self.read_data(att_tbl_addr);
             // println!("Attr table is {:#X} read from {:#X}", attr_table, att_tbl_addr);
             let attr:usize;
-            if (sl % 32) < 16 {
+            if (coarsey % 4) < 2 {
                 if (coarsex % 4) < 2 {
                     attr = ((attr_table & 0b0000_0011) >> 0) as usize;
                 } else {
@@ -402,18 +403,19 @@ impl PPU {
             }
 
             let offset = self.vram_addr >> 12;
-            let tile_data1 = self.read_data(tile_addr + offset);
-            let tile_data2 = self.read_data(tile_addr + 8 + offset);
+            let tile_data1 = &self.read_data(tile_addr + offset);
+            let tile_data2 = &self.read_data(tile_addr + 8 + offset);
 
-            for px in 0..8 {
+            for mut px in 0..8 {
                 let pixel_x = (col as isize * 8) - self.fine_x as isize + px as isize;
                 if pixel_x <= 255 && pixel_x >= 0 {
-                    let pv = ((tile_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (tile_data1 & (1 << 7 - px)) >> 7 - px;
+                    px = 7 - px;
+                    let pv = ((tile_data2 & (1 << px)) >> px) << 1 | (tile_data1 & (1 << px)) >> px;
                     if pv > 0 {
                         let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize];
                         self.screen[sl as usize][pixel_x as usize] = pixel;
 
-                        if sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 && !self.sprite0_hit {
+                        if self.sprite0_dot == 0xFF && sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 {
                             self.sprite0_bg_prerender[pixel_x as usize] = pv;
                         }
                     }
@@ -430,10 +432,11 @@ impl PPU {
         // TODO: deal with more than 8 sprites on a scanline
         // TODO: 8x16 sprites
         let sl = self.scanline;
+
         for mut sprite in 0..64 {
             sprite = 63 - sprite;
 
-            let y = self.oam[sprite * 4] as i16;
+            let y = self.oam[sprite * 4] as i16 + 1;
             // println!("sprite {:} is at {:}", sprite, y);
             if sl >= y && sl <= y + 7 {
                 let mut index = self.oam[(sprite * 4) + 1] as u16 * 16;
@@ -472,11 +475,6 @@ impl PPU {
                         let pixel = if background && bgpixel != PALETTE[bgcolor] {
                             bgpixel
                         } else {
-                            if !self.sprite0_hit && sprite == 0 {
-                                self.sprite0_dot = x as u8 + px as u8;
-                                //self.sprite0_hit = true;
-                                // println!("Sprite0 hit on SL {} - sprite0 y is {}", self.scanline, self.oam[0]);
-                            }
                             let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
                             PALETTE[plt]
                         };
