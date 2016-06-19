@@ -50,7 +50,7 @@ fn main() {
 
 
     let cart = cart::Cart::new(&rompath);
-    println!("{:#?}", cart);
+    // println!("{:#?}", cart);
     let chr_rom = cart::ChrRom::new(&rompath);
     let apu = apu::APU::new();
 
@@ -63,34 +63,37 @@ fn main() {
     };
 
     let pc = cpubus.cart.read_cart_u16(RESET_VECTOR_LOC);
+    // println!("PC is {:#X}", pc);
     let mut cpu = cpu::CPU::new(cpubus, pc as u16);
-    println!("{:#?}", cpu);
+    // println!("{:#?}", cpu);
 
     // let mut ticks = 0;
     // TODO: re-add specific run conditions for debugging
-    println!("start time is {}", time::precise_time_ns());
+    let cpustart = time::precise_time_ns();
 
     let mut nmi = false;
     'main: loop {
 
         let (op, instr) = cpu.read_instruction();
+        if op == 0 {
+            break;
+        }
 
 
         // TODO: Move this to a specific debug output
-        let debug = false;
-        if debug {
+        // let debug = true;
+        if false {
             cpu_debug(&op, &instr, &cpu);
         }
+
 
         cpu.cycle += instr.ticks as isize * PPU_MULTIPLIER;
 
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
             nmi = cpu.bus.ppu.render_scanline();
-
         }
         cpu.execute_op(&op, &instr);
-
 
         if !cpu.bus.ppu.sprite0_hit &&
             cpu.bus.ppu.sprite0_dot != 0xFF &&
@@ -163,7 +166,7 @@ fn main() {
 
     }
 
-    println!("start time is {}", time::precise_time_ns());
+    println!("run time is {}", time::precise_time_ns() - cpustart);
 }
 
 

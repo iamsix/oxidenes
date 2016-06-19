@@ -766,11 +766,15 @@ impl CPU {
                 self.bus.ram[addr as usize]
             }
 
+            PPUCTRL => self.bus.ppu.lastwrite,
             PPUMASK => self.bus.ppu.lastwrite,
+            OAMADDR => self.bus.ppu.lastwrite,
+
             PPUSTATUS => self.bus.ppu.read_ppustatus(),
             PPUDATA => self.bus.ppu.read_ppudata(),
             OAMDATA => self.bus.ppu.read_oamdata(),
 
+            SND_CHN => 0,
             // TODO: implement joysticks
             JOY1 => {
                 let ret = (self.joy1 & (1 << self.joy1_read)) >> self.joy1_read;
@@ -855,10 +859,7 @@ impl CPU {
                     // println!("ramaddr: {:#X} data: {:#X}", ramaddr, data);
                     self.bus.ppu.write_oamdata(data);
                 }
-                //let mut cycles = 513;
-                /*if self.cycle % 2 == 1 {
-                    cycles += 1;
-                }*/
+
                 self.cycle += 513 * PPU_MULTIPLIER;
                 self.bus.ppu.scanline += 4;
             }
@@ -870,12 +871,21 @@ impl CPU {
 
             EXPANSION_ROM_START...EXPANSION_ROM_END => {
                 // Used by some mappers, can usually be ignored
-                panic!("Expansion rom is unimplemented")
+                // panic!("Expansion rom is unimplemented")
             }
 
             SRAM_START...SRAM_END => panic!("SRAM is unimplemented"),
 
-            PRG_ROM_START...PRG_ROM_END => panic!("Mappers are unimplemented"),
+            PRG_ROM_START...PRG_ROM_END => {
+                if self.bus.cart.mapper == 0 {
+                    // mapper 0 doesn't do anything afaik.
+                }
+                else if self.bus.cart.mapper == 2 {
+                    self.bus.cart.low_prg_bank = value & 0xF
+                } else {
+                    panic!("Mappers are unimplemented")
+                }
+            },
 
             _ => {panic!("Invalid write location {:#X}", addr);},
         }

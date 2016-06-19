@@ -41,7 +41,7 @@ impl ChrRom {
         if chr.chr_rom_banks != 0 {
             let offset = INES_OFFSET as usize + (1024 * 16 * chr.prg_rom_banks as usize);
             let mut rom = Vec::new();
-            rom.extend_from_slice(&romfile[offset..offset + 0x2000]);
+            rom.extend_from_slice(&romfile[offset..]);
             chr.rom = rom.into_boxed_slice();
         }
 
@@ -73,7 +73,9 @@ pub struct Cart {
     four_screen_vram: bool,
     //   prg_ram_present: bool,
     //   trainer: bool,
-    mapper: u8,
+    pub mapper: u8,
+
+    pub low_prg_bank: u8,
 }
 
 impl Cart {
@@ -90,6 +92,7 @@ impl Cart {
             //           prg_ram_present: false,
             //           trainer: false,
             mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
+            low_prg_bank: 0,
 
             rom: romfile,
         }
@@ -117,16 +120,27 @@ impl Cart {
         let read_pos: usize;
 
         if addr >= PRG_ROM_LOWER_START && addr < PRG_ROM_LOWER_START + PRG_ROM_LOWER_LEN {
-            // println!("shouldn't be here yet");
-            read_pos = ((addr - PRG_ROM_LOWER_START) + INES_OFFSET) as usize;
+            let block:usize = if self.mapper == 0 {
+                0
+            } else if self.mapper == 2 {
+                (1024 * 16) * self.low_prg_bank as usize
+            } else {
+                0
+            };
+
+            read_pos = ((addr as usize - PRG_ROM_LOWER_START as usize) + block + INES_OFFSET as usize) as usize;
         } else if addr >= PRG_ROM_UPPER_START && addr <= PRG_ROM_UPPER_START + (PRG_ROM_UPPER_LEN - 1) {
             // UPPER BLOCK
             let mut block = 0;
             if self.prg_rom_banks > 1 {
                 // TODO: MAPPERS!!
-                block = 1024 * 16;
+                if self.mapper == 0 {
+                    block = 1024 * 16;
+                } else if self.mapper == 2 {
+                    block = 1024 * 16 * (self.prg_rom_banks as usize - 1);
+                }
             }
-            read_pos = ((addr - PRG_ROM_UPPER_START) + block + INES_OFFSET) as usize;
+            read_pos = ((addr as usize - PRG_ROM_UPPER_START as usize) + block + INES_OFFSET as usize) as usize;
         } else {
             panic!("virtual memory address {:#X} is not in the PRG rom space",
                    addr)

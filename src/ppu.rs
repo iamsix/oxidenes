@@ -1,4 +1,5 @@
 use cart;
+use time;
 
 const PALETTE: [u32; 64] = [
     0x656565, 0x002D69, 0x131F7F, 0x3C137C, 0x600B62, 0x730A37, 0x710F07, 0x5A1A00,
@@ -401,18 +402,18 @@ impl PPU {
             if self.bg_table_high {
                 tile_addr += 0x1000
             }
-
             let offset = self.vram_addr >> 12;
-            let tile_data1 = &self.read_data(tile_addr + offset);
-            let tile_data2 = &self.read_data(tile_addr + 8 + offset);
+            let tile_data1 = self.read_data(tile_addr + offset);
+            let tile_data2 = self.read_data(tile_addr + 8 + offset);
 
+            // let start = time::precise_time_ns();
             for mut px in 0..8 {
                 let pixel_x = (col as isize * 8) - self.fine_x as isize + px as isize;
                 if pixel_x <= 255 && pixel_x >= 0 {
                     px = 7 - px;
                     let pv = ((tile_data2 & (1 << px)) >> px) << 1 | (tile_data1 & (1 << px)) >> px;
                     if pv > 0 {
-                        let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize];
+                        let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize % 64];
                         self.screen[sl as usize][pixel_x as usize] = pixel;
 
                         if self.sprite0_dot == 0xFF && sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 {
@@ -421,9 +422,11 @@ impl PPU {
                     }
                 }
             }
-
+            // let end = time::precise_time_ns();
             self.increment_x();
 
+
+           // println!("{} to render 8px", end - start);
         }
         // println!("universal BG is {:#X}", bgcolor);
 }
@@ -462,7 +465,7 @@ impl PPU {
                 let sprite_data1 = self.read_data(index + offset as u16);
                 let sprite_data2 = self.read_data(index + 8 + offset as u16);
 
-                let bgcolor = self.palette[0] as usize;
+                let bgcolor = self.palette[0] as usize % 64;
                 for px in 0..8 {
                     let pv:u8;
                     if flip_h {
@@ -476,7 +479,7 @@ impl PPU {
                             bgpixel
                         } else {
                             let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
-                            PALETTE[plt]
+                            PALETTE[plt % 64]
                         };
                         self.screen[sl as usize][x as usize + px as usize] = pixel;
                     }
@@ -490,6 +493,7 @@ impl PPU {
 
     pub fn render_scanline(&mut self) -> bool {
 
+        // let start = time::precise_time_ns();
         // println!("Before: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
 
         self.scanline += 1;
@@ -507,8 +511,6 @@ impl PPU {
             // copy Vertical bits from t to v
             if self.show_bg || self.show_sprites {
                 // println!("Frame# {}", self.framecount);
-                let bgcolor = PALETTE[self.palette[0] as usize];
-                self.screen = [[bgcolor; 256]; 240];
                 self.vram_addr &= 0x041F;
                 self.vram_addr |= self.t_vram_addr & !0x041F;
             }
@@ -517,12 +519,16 @@ impl PPU {
 
 
         if self.scanline >= 0 && self.scanline < 240 {
+            let bgcolor = PALETTE[self.palette[0] as usize % 64];
+            self.screen[self.scanline as usize] = [bgcolor; 256];
             if !self.sprite0_hit && self.show_bg && self.show_sprites {
                 self.sprite0_prerender = [0; 8];
                 self.sprite0_bg_prerender = [0; 256];
             }
 
             // let each function run the whole scanline and paint 'over' eachother
+            //let mut startbg:u64 = 0;
+            //let mut endbg:u64
             if self.show_bg {
                 self.render_bg();
             }
@@ -555,6 +561,7 @@ impl PPU {
                     if  ls != 0 && self.sprite0_prerender[x] != 0 {
                         // self.sprite0_hit = true;
                         self.sprite0_dot = offset as u8;
+                        // println!("hit on scanline {} on dot {}", self.scanline, offset);
 
                     }
                 }
@@ -576,12 +583,14 @@ impl PPU {
             self.nmi_generated = true;
             return true;
         }
+        // let end = time::precise_time_ns();
+        // println!("sl {} took {}",self.scanline, end - start);
+
         false
     }
 
     fn increment_y(&mut self) {
-        // y increment V...
-        // println!("pre-INCR y {:#X}", self.vram_addr);
+        // y increment V....
         if (self.vram_addr & 0x7000) != 0x7000 {  // if fine Y < 7
             self.vram_addr += 0x1000;  // Incr fine y
             // println!("Incr fine y");
