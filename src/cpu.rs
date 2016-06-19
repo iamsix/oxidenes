@@ -238,17 +238,37 @@ impl CPU {
                 self.program_counter = hi << 8 | lo;
             }
 
-            // LSR
-            0x4A | 0x46 | 0x56 | 0x4E | 0x5E => self.shift_right(instr.addr_mode, addr),
+//          BVC  | BVS  | BCS  | BCC  | BEQ  | BNE  | BPL  | BMI
+            0x50 | 0x70 | 0xB0 | 0x90 | 0xF0 | 0xD0 | 0x10 | 0x30 =>
+                self.program_counter = addr,
 
-            // ASL
-            0x0A | 0x06 | 0x16 | 0x0E | 0x1E => self.shift_left(instr.addr_mode, addr),
+            // RTI - implied
+            0x40 => {
+                let tmp = self.pull_stack();
+                self.status_reg = tmp.into();
+                let lo = self.pull_stack() as u16;
+                let hi = self.pull_stack() as u16;
+                let value: u16 = hi << 8 | lo;
+                self.program_counter = value;
+            }
 
-            // ROR
-            0x6A | 0x66 | 0x76 | 0x6E | 0x7E => self.rotate_right(instr.addr_mode, addr),
+            // STX
+            0x86 | 0x96 | 0x8E => {
+                let tmp = self.index_x;
+                self.cpu_write_u8(addr, tmp);
+            }
 
-            // ROL
-            0x2A | 0x26 | 0x36 | 0x2E | 0x3E => self.rotate_left(instr.addr_mode, addr),
+            // STA
+            0x85 | 0x95 | 0x8D | 0x81 | 0x91 | 0x99 | 0x9D => {
+                let tmp = self.accumulator;
+                self.cpu_write_u8(addr, tmp);
+            }
+
+            // STY - zeropage
+            0x84 | 0x94 | 0x8C => {
+                let tmp = self.index_y;
+                self.cpu_write_u8(addr, tmp);
+            }
 
             // LDA
             0xA9 | 0xA5 | 0xB5 | 0xAD | 0xB9 | 0xBD | 0xA1 | 0xB1 => {
@@ -268,15 +288,17 @@ impl CPU {
                 self.set_register(value, RegType::Y);
             }
 
-            // RTI - implied
-            0x40 => {
-                let tmp = self.pull_stack();
-                self.status_reg = tmp.into();
-                let lo = self.pull_stack() as u16;
-                let hi = self.pull_stack() as u16;
-                let value: u16 = hi << 8 | lo;
-                self.program_counter = value;
-            }
+            // LSR
+            0x4A | 0x46 | 0x56 | 0x4E | 0x5E => self.shift_right(instr.addr_mode, addr),
+
+            // ASL
+            0x0A | 0x06 | 0x16 | 0x0E | 0x1E => self.shift_left(instr.addr_mode, addr),
+
+            // ROR
+            0x6A | 0x66 | 0x76 | 0x6E | 0x7E => self.rotate_right(instr.addr_mode, addr),
+
+            // ROL
+            0x2A | 0x26 | 0x36 | 0x2E | 0x3E => self.rotate_left(instr.addr_mode, addr),
 
             // ORA
             0x09 | 0x05 | 0x15 | 0x01 | 0x11 | 0x0D | 0x19 | 0x1D =>
@@ -297,24 +319,6 @@ impl CPU {
             // SBC
             0xE9 | 0xE5 | 0xF5 | 0xE1 | 0xF1 | 0xED | 0xF9 | 0xFD =>
                 self.sub_with_carry(addr),
-
-            // STX
-            0x86 | 0x96 | 0x8E => {
-                let tmp = self.index_x;
-                self.cpu_write_u8(addr, tmp);
-            }
-
-            // STA
-            0x85 | 0x95 | 0x8D | 0x81 | 0x91 | 0x99 | 0x9D => {
-                let tmp = self.accumulator;
-                self.cpu_write_u8(addr, tmp);
-            }
-
-            // STY - zeropage
-            0x84 | 0x94 | 0x8C => {
-                let tmp = self.index_y;
-                self.cpu_write_u8(addr, tmp);
-            }
 
             // JSR-Absolute
             0x20 => {
@@ -400,11 +404,6 @@ impl CPU {
 
             // DEC - zeropage
             0xC6 | 0xD6 | 0xCE | 0xDE => self.decrement_memory(addr),
-
-//          BVC  | BVS  | BCS  | BCC  | BEQ  | BNE  | BPL  | BMI
-            0x50 | 0x70 | 0xB0 | 0x90 | 0xF0 | 0xD0 | 0x10 | 0x30 =>
-                self.program_counter = addr,
-
 
             // BIT
             0x24 | 0x2C => {
