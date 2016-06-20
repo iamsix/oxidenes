@@ -2,6 +2,7 @@
 name = "oxidenes"
 version = "0.0.1"
 dependencies = [
+ "gl 0.6.0 (git+https://github.com/bjz/gl-rs)",
  "sdl2 0.20.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -10,6 +11,24 @@ dependencies = [
 name = "bitflags"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "gl"
+version = "0.6.0"
+source = "git+https://github.com/bjz/gl-rs#0154e84b052523693a1afd44bb6d74bbd235c4f6"
+dependencies = [
+ "gl_generator 0.5.1 (git+https://github.com/bjz/gl-rs)",
+]
+
+[[package]]
+name = "gl_generator"
+version = "0.5.1"
+source = "git+https://github.com/bjz/gl-rs#0154e84b052523693a1afd44bb6d74bbd235c4f6"
+dependencies = [
+ "khronos_api 1.0.0 (git+https://github.com/bjz/gl-rs)",
+ "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "xml-rs 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "kernel32-sys"
@@ -21,6 +40,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "khronos_api"
+version = "1.0.0"
+source = "git+https://github.com/bjz/gl-rs#0154e84b052523693a1afd44bb6d74bbd235c4f6"
+
+[[package]]
 name = "lazy_static"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -28,6 +52,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "libc"
 version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "log"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -149,4 +178,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "winapi-build"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "xml-rs"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "bitflags 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 

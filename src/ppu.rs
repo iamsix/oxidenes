@@ -1,5 +1,5 @@
 use cart;
-use time;
+// use time;
 
 const PALETTE: [u32; 64] = [
     0x656565, 0x002D69, 0x131F7F, 0x3C137C, 0x600B62, 0x730A37, 0x710F07, 0x5A1A00,
@@ -493,7 +493,7 @@ impl PPU {
 
     pub fn render_scanline(&mut self) -> bool {
 
-        // let start = time::precise_time_ns();
+       // let start = time::precise_time_ns();
         // println!("Before: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
 
         self.scanline += 1;

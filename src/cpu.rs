@@ -761,7 +761,16 @@ impl CPU {
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
-                // println!("Read {:#X} at {:#X} in RAM", self.bus.ram[addr as usize], addr);
+
+/*              some mario cheats...
+                if addr == 0x075A {
+                    return 30 // lives
+                }
+                if addr == 0x079F {
+                    return 0xff // star
+                }
+                */
+
                 self.bus.ram[addr as usize]
             }
 

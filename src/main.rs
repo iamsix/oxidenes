@@ -3,7 +3,7 @@ extern crate time;
 
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::keyboard::Keycode;
-use sdl2::event::{Event,WindowEventId};
+use sdl2::event::Event;
 
 // use time;
 
@@ -36,7 +36,7 @@ fn main() {
 
     let sdl = sdl2::init().unwrap();
     let video = sdl.video().unwrap();
-    let window = video.window("OxideNES", 256, 240)
+    let window = video.window("OxideNES", 256 * 2, 240 * 2)
         .position_centered()
         .opengl()
         .build()
@@ -69,10 +69,10 @@ fn main() {
 
     // let mut ticks = 0;
     // TODO: re-add specific run conditions for debugging
-    let cpustart = time::precise_time_ns();
 
     let mut nmi = false;
     'main: loop {
+        let cpustart = time::precise_time_ns();
 
         let (op, instr) = cpu.read_instruction();
         if op == 0 {
@@ -92,7 +92,67 @@ fn main() {
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
             nmi = cpu.bus.ppu.render_scanline();
+
+            if cpu.bus.ppu.scanline == 240 {
+                render_frame(&cpu.bus.ppu.screen, &mut renderer, &mut texture);
+
+                // Frame limiter.
+                let mut frametime = time::precise_time_ns() - cpustart;
+                // println!("Frame took {}", frametime);
+                if frametime < 16_666_667 {
+                    frametime = 16_666_667 - frametime;
+                    std::thread::sleep(std::time::Duration::new(0, frametime as u32));
+                }
+
+
+                for event in events.poll_iter() {
+                    match event {
+                        Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                            break 'main
+                        }
+                        _ => ()
+                    }
+                }
+            }
+
+            if cpu.bus.ppu.scanline == -1 {
+                let keys: Vec<Keycode> = events.keyboard_state().pressed_scancodes().
+                                filter_map(Keycode::from_scancode).collect();
+
+                for key in keys {
+                    match key {
+                        Keycode::LCtrl => {
+                            // panic!("Works..");
+                            cpu.joy1 |= 1 << 0;
+                        }
+                        Keycode::LShift => {
+                            cpu.joy1 |= 1 << 1;
+                        }
+                        Keycode::Space => {
+                            cpu.joy1 |= 1 << 2;
+                        }
+                        Keycode::Return => {
+                            cpu.joy1 |= 1 << 3;
+                        }
+                        Keycode::Up => {
+                            cpu.joy1 |= 1 << 4;
+                        }
+                        Keycode::Down => {
+                            cpu.joy1 |= 1 << 5;
+                        }
+                        Keycode::Left => {
+                            cpu.joy1 |= 1 << 6;
+                        }
+                        Keycode::Right => {
+                            cpu.joy1 |= 1 << 7;
+                        }
+                        _ => ()// panic!("Unkown key {:?}", key),
+
+                    }
+                }
+            }
         }
+
         cpu.execute_op(&op, &instr);
 
         if !cpu.bus.ppu.sprite0_hit &&
@@ -111,62 +171,9 @@ fn main() {
 
 
 
-        if cpu.bus.ppu.scanline == 240 {
-            // println!("screen 10,10 properly: {:#X}", cpu.bus.ppu.screen[10][10]);
-            render_frame(&cpu.bus.ppu.screen, &mut renderer, &mut texture);
-            for event in events.poll_iter() {
-                match event {
-                    Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                        break 'main
-                    }
-                    _ => ()
-                }
-            }
-        }
-
-        if cpu.bus.ppu.scanline == -1 {
-
-
-            let keys: Vec<Keycode> = events.keyboard_state().pressed_scancodes().
-                            filter_map(Keycode::from_scancode).collect();
-
-            for key in keys {
-                match key {
-                    Keycode::LCtrl => {
-                        // panic!("Works..");
-                        cpu.joy1 |= 1 << 0;
-                    }
-                    Keycode::LShift => {
-                        cpu.joy1 |= 1 << 1;
-                    }
-                    Keycode::Space => {
-                        cpu.joy1 |= 1 << 2;
-                    }
-                    Keycode::Return => {
-                        cpu.joy1 |= 1 << 3;
-                    }
-                    Keycode::Up => {
-                        cpu.joy1 |= 1 << 4;
-                    }
-                    Keycode::Down => {
-                        cpu.joy1 |= 1 << 5;
-                    }
-                    Keycode::Left => {
-                        cpu.joy1 |= 1 << 6;
-                    }
-                    Keycode::Right => {
-                        cpu.joy1 |= 1 << 7;
-                    }
-                    _ => ()// panic!("Unkown key {:?}", key),
-
-                }
-
-            }
-        }
-
     }
 
-    println!("run time is {}", time::precise_time_ns() - cpustart);
+    // println!("run time is {}", time::precise_time_ns() - cpustart);
 }
 
 
