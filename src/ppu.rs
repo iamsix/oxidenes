@@ -40,7 +40,7 @@ pub struct PPU {
     // PPUSTATUS $2002
     sprite_overflow: bool,
     pub sprite0_hit: bool,
-    vblank: bool,
+    pub vblank: bool,
 
 
     pub sprite0_dot: u8,
@@ -73,6 +73,8 @@ pub struct PPU {
     pub screen: [[u32; 256]; 240],
 
     pub framecount: usize,
+    pub extra_cycle: bool,
+    pub cycles: isize,
 }
 
 impl PPU {
@@ -134,6 +136,8 @@ impl PPU {
             sprite0_bg_prerender: [0; 256],
 
             framecount: 0,
+            extra_cycle: false,
+            cycles: 0,
         }
     }
 
@@ -143,21 +147,18 @@ impl PPU {
 
         self.t_vram_addr &= 0x73FF;
         self.t_vram_addr |= (data as u16 & 3) << 10;
-      //  println!("Write PPUCTRL {:#b} scanlien is {}", data, self.scanline);
-/*        self.base_nametable = match data & 3 {
-            0 => 0x2000,
-            1 => 0x2400,
-            2 => 0x2800,
-            3 => 0x2C00,
-            _ => 0
-        };
-*/
+        println!("Nametable set to {}", (data as u16 & 3));
         self.vram_increment = (data & (1 << 2)) != 0;
         self.sprite_table_high = (data & (1 << 3)) != 0;
         self.bg_table_high = (data & (1 << 4)) != 0;
         self.sprite_8x16 = (data & (1 << 5)) != 0;
         self.ppu_master = (data & (1 << 6)) != 0;
+        let previous = self.nmi_enable;
         self.nmi_enable = (data & (1 << 7)) != 0;
+
+        if self.nmi_enable && !previous {
+            self.nmi_generated = false;
+        }
     }
 
     // $2001
@@ -177,13 +178,13 @@ impl PPU {
     // $2002
     pub fn read_ppustatus(&mut self) -> u8{
         let mut value:u8 = 0;
-        if self.sprite_overflow{
+        if self.sprite_overflow {
             value |= 1 << 5
         }
-        if self.sprite0_hit{
+        if self.sprite0_hit {
             value |= 1 << 6
         }
-        if self.vblank{
+        if self.vblank {
             value |= 1 << 7;
             self.vblank = false;
             self.nmi_generated = false;
@@ -216,7 +217,7 @@ impl PPU {
         self.lastwrite = data;
         if !self.w_toggle {
             self.fine_x = data & 0x7;
-            // println!("Finex set to {} after SL {}", self.fine_x, self.scanline);
+            println!("Finex set to {} after SL {}", self.fine_x, self.scanline);
             self.t_vram_addr &= 0xFFE0;
             self.t_vram_addr |= ((data & 0xF8) >> 3) as u16;
             // self.scroll_x = data;
@@ -237,13 +238,14 @@ impl PPU {
             self.t_vram_addr &= 0x00FF;
             self.t_vram_addr |= (data as u16 & 0x7F) << 8;
             // self.ppu_addr = (data as u16) << 8;
+        //    println!("first write to PPUADDR: {:#X} after sl {}", data, self.scanline);
         } else {
             self.t_vram_addr &= 0xFF00;
             self.t_vram_addr |= data as u16;
 
             self.vram_addr = self.t_vram_addr;
             // self.ppu_addr |= data as u16;
-//            println!("PPUADDR set: {:#X}", self.vram_addr);
+        //    println!("PPUADDR set: {:#X} after sl {}", self.vram_addr, self.scanline);
         }
         self.w_toggle = !self.w_toggle;
     }
@@ -353,7 +355,6 @@ impl PPU {
 
 // nametables contain offsets referring to patterns..
     fn render_bg(&mut self) {
-        // TODO: scrolling - which needs messing with nametable stuff
         // TODO: use left 8px setting
         /*
         read the nametable at the base nametable address to lookup the tile
@@ -379,7 +380,6 @@ impl PPU {
                                 ((self.vram_addr >> 4) & 0x38) |
                                 ((self.vram_addr >> 2) & 0x07);
 
-            // TODO need to offset attr table with fine_x
             let attr_table = &self.read_data(att_tbl_addr);
             // println!("Attr table is {:#X} read from {:#X}", attr_table, att_tbl_addr);
             let attr:usize;
@@ -429,7 +429,10 @@ impl PPU {
            // println!("{} to render 8px", end - start);
         }
         // println!("universal BG is {:#X}", bgcolor);
-}
+    }
+
+
+
 
     fn render_sprites(&mut self) {
         // TODO: deal with more than 8 sprites on a scanline
@@ -473,7 +476,11 @@ impl PPU {
                     } else {
                         pv = ((sprite_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (sprite_data1 & (1 << 7 - px)) >> 7 - px;
                     }
+
                     if (x as usize + px as usize <= 255) && pv > 0 {
+                        // TODO: This is actually wrong and shouldn't render on a 0 background value
+                        // regardless of colour (palette colour could be the same as bgcolor)
+                        // I would need the pre-render bg line to determine that
                         let bgpixel = self.screen[sl as usize][x as usize + px as usize];
                         let pixel = if background && bgpixel != PALETTE[bgcolor] {
                             bgpixel
@@ -483,7 +490,7 @@ impl PPU {
                         };
                         self.screen[sl as usize][x as usize + px as usize] = pixel;
                     }
-                    if sprite == 0 && !self.sprite0_hit {
+                    if sprite == 0 && self.sprite0_dot == 0xFF && !self.sprite0_hit {
                         self.sprite0_prerender[px] = pv;
                     }
                 }
@@ -491,44 +498,97 @@ impl PPU {
         }
     }
 
-    pub fn render_scanline(&mut self) -> bool {
 
-       // let start = time::precise_time_ns();
-        // println!("Before: Scanline {:} Vblank: {:?} NMI: {:?}", self.scanline, self.vblank, self.nmi_enable);
+    pub fn tick (&mut self, ticks: isize) -> bool {
+        for tick in 0..ticks {
+            self.cycles += 1;
+            if self.cycles == 341 {
+                self.cycles = 0;
+            }
+            if !self.sprite0_hit &&
+            self.sprite0_dot != 0xFF &&
+            self.cycles == self.sprite0_dot as isize
+            {
+                println!("Sprite 0 hit on sl {} dot {}", self.scanline, self.sprite0_dot);
+                self.sprite0_hit = true;
+            }
+            match self.cycles {
+                1 => {
+                    if self.scanline == -1 {
+                        self.nmi_generated = false;
+                        self.sprite0_hit = false;
+                        self.sprite0_dot = 0xFF;
+                        self.vblank  = false;
+                        if self.initial_reset {self.initial_reset = false};
+                    }
+                    if self.scanline == 241 && !self.initial_reset {
+                        self.vblank = true;
+                    }
+                }
+                _ => {}
+            }
+
+
+        }
+        if self.vblank && self.nmi_enable && !self.nmi_generated && self.cycles > 2 {
+            // println!("NMI");
+            self.nmi_generated = true;
+            return true;
+        }
+        return false;
+
+    }
+
+
+    pub fn render_scanline(&mut self) -> bool {
 
         self.scanline += 1;
         if self.scanline > 260 {
             self.scanline = -1;
-            self.nmi_generated = false;
-            // self.sprite0_hit = false;
-            if self.initial_reset {self.initial_reset = false};
 
-            self.sprite0_hit = false;
-            self.sprite0_dot = 0xFF;
-            self.vblank  = false;
 
-            // self.increment_y();
+
+//            self.nmi_generated = false;
+//            self.sprite0_hit = false;
+//            self.sprite0_dot = 0xFF;
+//            self.vblank  = false;
+
             // copy Vertical bits from t to v
             if self.show_bg || self.show_sprites {
-                // println!("Frame# {}", self.framecount);
                 self.vram_addr &= 0x041F;
                 self.vram_addr |= self.t_vram_addr & !0x041F;
+
             }
 
         }
 
 
         if self.scanline >= 0 && self.scanline < 240 {
-            let bgcolor = PALETTE[self.palette[0] as usize % 64];
-            self.screen[self.scanline as usize] = [bgcolor; 256];
-            if !self.sprite0_hit && self.show_bg && self.show_sprites {
+            if  self.show_bg || self.show_sprites {
+                let bgcolor = PALETTE[self.palette[0] as usize % 64];
+                self.screen[self.scanline as usize] = [bgcolor; 256];
+            }
+
+            if self.scanline == 0 && self.show_bg {
+                // print!("Frame# {}\r\n", self.framecount);
+                // this actually happens on the very end of -1
+                // but doing it at 0 is better timing
+                self.extra_cycle = self.framecount % 2 == 1;
+                if self.extra_cycle {
+                    self.cycles += 1;
+                }
+                self.framecount += 1;
+            } else {
+                self.extra_cycle = false;
+            }
+
+
+            if self.sprite0_dot == 0xFF && !self.sprite0_hit && self.show_bg && self.show_sprites {
                 self.sprite0_prerender = [0; 8];
                 self.sprite0_bg_prerender = [0; 256];
             }
 
             // let each function run the whole scanline and paint 'over' eachother
-            //let mut startbg:u64 = 0;
-            //let mut endbg:u64
             if self.show_bg {
                 self.render_bg();
             }
@@ -543,11 +603,9 @@ impl PPU {
                 // copy horizontal bits from t to v
                 self.vram_addr &= 0x7BE0;
                 self.vram_addr |= self.t_vram_addr & !0x7BE0;
-
             }
 
-            if !self.sprite0_hit && self.show_bg && self.show_sprites {
-                //evaluate 1 line ahead?
+            if self.sprite0_dot == 0xFF && !self.sprite0_hit && self.show_bg && self.show_sprites {
 
                 let px0 = self.oam[3] as usize;
                 for x in 0..8 {
@@ -559,10 +617,8 @@ impl PPU {
                     };
 
                     if  ls != 0 && self.sprite0_prerender[x] != 0 {
-                        // self.sprite0_hit = true;
                         self.sprite0_dot = offset as u8;
                         // println!("hit on scanline {} on dot {}", self.scanline, offset);
-
                     }
                 }
             }
@@ -571,20 +627,15 @@ impl PPU {
 
 
         if self.scanline == 241 && !self.initial_reset {
-            self.vblank = true;
+//            self.vblank = true;
             // println!("sprite0 {:?}", self.sprite0_hit);
-            if self.show_bg {
-                self.framecount += 1;
-            }
         }
 
-
-        if self.vblank && self.nmi_enable && !self.nmi_generated{
-            self.nmi_generated = true;
-            return true;
-        }
-        // let end = time::precise_time_ns();
-        // println!("sl {} took {}",self.scanline, end - start);
+//        if self.vblank && self.nmi_enable && !self.nmi_generated{
+//            // println!("NMI");
+//            self.nmi_generated = true;
+//            return true;
+//        }
 
         false
     }
@@ -620,4 +671,3 @@ impl PPU {
     }
 
 }
-

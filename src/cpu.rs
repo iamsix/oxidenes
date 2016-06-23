@@ -20,9 +20,6 @@ pub struct CPU {
     pub stack_pointer: u8, // S or SP
 
     pub bus: Bus,
-
-    pub joy1: u8,
-    pub joy1_read: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,9 +59,6 @@ impl CPU {
             program_counter: pc,
             stack_pointer: 0xfd,
             bus: bus,
-
-            joy1: 0,
-            joy1_read: 0,
         }
     }
 
@@ -784,32 +778,20 @@ impl CPU {
 
             SND_CHN => 0,
             // TODO: implement joysticks
-            JOY1 => {
-                let ret = (self.joy1 & (1 << self.joy1_read)) >> self.joy1_read;
-                // println!("joy1 {:#b} ret {} at {}", self.joy1, ret, self.joy1_read);
-                self.joy1 &= !(1 << self.joy1_read);
-                self.joy1_read += 1;
-                // if self.joy1_read > 8
-                ret
-            },
+            JOY1 => self.bus.joy.read_joy1(),
             JOY2 => 0,
 
-            EXPANSION_ROM_START...EXPANSION_ROM_END => {
-                // Used by some mappers, can usually be ignored
-                // panic!("Expansion rom is unimplemented {:#X}", addr)
-                0
-            }
-
-            SRAM_START...SRAM_END => 0,// panic!("SRAM is unimplemented {:#X}", addr),
-
-            PRG_ROM_START...PRG_ROM_END => self.bus.cart.read_cart_u8(addr),
+            EXPANSION_ROM_START...PRG_ROM_END => self.bus.cart.read_cart_u8(addr),
 
             _ => panic!("Invalid read location {:#X}", addr),
         }
     }
 
     // The actual 6502 can't read a u16, this is for convenince only
-    fn cpu_read_u16(&self, addr: u16) -> u16 {
+    fn cpu_read_u16(&self, mut addr: u16) -> u16 {
+        if addr > 0x2007 && addr < 0x4000 {
+            addr = 0x2000 + ((addr - 0x2000) % 8)
+        }
         // println!("Read {:#X}", addr);
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
@@ -820,20 +802,17 @@ impl CPU {
             }
 
 
-            EXPANSION_ROM_START...EXPANSION_ROM_END => {
-                // Used by some mappers, can usually be ignored
-                panic!("Expansion rom is unimplemented")
-            }
-
-            SRAM_START...SRAM_END => panic!("SRAM is unimplemented"),
-
-            PRG_ROM_START...PRG_ROM_END => self.bus.cart.read_cart_u16(addr),
+            EXPANSION_ROM_START...PRG_ROM_END => self.bus.cart.read_cart_u16(addr),
 
             _ => panic!("Invalid u16 read location {:#X}", addr),
         }
     }
 
-    fn cpu_write_u8(&mut self, addr: u16, value: u8) {
+    fn cpu_write_u8(&mut self, mut addr: u16, value: u8) {
+
+        if addr > 0x2007 && addr < 0x4000 {
+            addr = 0x2000 + ((addr - 0x2000) % 8)
+        }
 
         match addr {
             RAM_START...RAM_VIRTUAL_END => {
@@ -849,6 +828,7 @@ impl CPU {
 
             PPUCTRL => self.bus.ppu.write_ppuctrl(value),
             PPUMASK => self.bus.ppu.write_ppumask(value),
+            PPUSTATUS => {},
             OAMADDR => self.bus.ppu.write_oamaddr(value),
             OAMDATA => self.bus.ppu.write_oamdata(value),
             PPUSCROLL => self.bus.ppu.write_ppuscroll(value),
@@ -862,6 +842,7 @@ impl CPU {
             OAMDMA => {
                 // println!("OAMDMA at {:#X}", value);
                 for i in 0..0x100 {
+                    // println!("OAMDMA");
                     let ramaddr:usize = (value as usize) << 8 | i;
                     let data = self.bus.ram[ramaddr];
                     // println!("ramaddr: {:#X} data: {:#X}", ramaddr, data);
@@ -869,31 +850,14 @@ impl CPU {
                 }
 
                 self.cycle += 513 * PPU_MULTIPLIER;
-                self.bus.ppu.scanline += 4;
+                self.cycle %= 341;
+                self.bus.ppu.cycles = self.cycle;
+                self.bus.ppu.scanline += 5;
             }
 
-            JOY1 => {if value == 0 {
-                // Sself.joy1 = 0;
-                self.joy1_read = 0;
-            }} // println!("Strobe Controllers {:#X}", value),
+            JOY1 => self.bus.joy.strobe_joy(value),
 
-            EXPANSION_ROM_START...EXPANSION_ROM_END => {
-                // Used by some mappers, can usually be ignored
-                // panic!("Expansion rom is unimplemented")
-            }
-
-            SRAM_START...SRAM_END => panic!("SRAM is unimplemented"),
-
-            PRG_ROM_START...PRG_ROM_END => {
-                if self.bus.cart.mapper == 0 {
-                    // mapper 0 doesn't do anything afaik.
-                }
-                else if self.bus.cart.mapper == 2 {
-                    self.bus.cart.low_prg_bank = value & 0xF
-                } else {
-                    panic!("Mappers are unimplemented")
-                }
-            },
+            EXPANSION_ROM_START...PRG_ROM_END => self.bus.cart.write_cart_u8(addr, value),
 
             _ => {panic!("Invalid write location {:#X}", addr);},
         }

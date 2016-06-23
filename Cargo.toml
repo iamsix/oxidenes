@@ -7,6 +7,3 @@ authors = [ "me" ]
 [dependencies]
 sdl2 = "0.20"
 time = "0.1"
-
-[dependencies.gl]
-    git = "https://github.com/bjz/gl-rs"

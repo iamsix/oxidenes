@@ -15,6 +15,7 @@ mod mem_map;
 mod cpu;
 mod apu;
 mod ppu;
+mod joy;
 mod opcodes;
 
 use opcodes::AddressMode;
@@ -29,6 +30,7 @@ pub struct Bus {
     cart: cart::Cart,
     apu: apu::APU,
     ppu: ppu::PPU,
+    joy: joy::Joy,
 }
 
 fn main() {
@@ -50,16 +52,19 @@ fn main() {
 
 
     let cart = cart::Cart::new(&rompath);
-    // println!("{:#?}", cart);
+    println!("{:#?}", cart);
     let chr_rom = cart::ChrRom::new(&rompath);
     let apu = apu::APU::new();
 
     let ppu = ppu::PPU::new(chr_rom);
+    let joy = joy::Joy::new();
+
     let cpubus = Bus {
         ram: vec![0; RAM_LEN as usize].into_boxed_slice(),
         cart: cart,
         apu: apu,
         ppu: ppu,
+        joy: joy,
     };
 
     let pc = cpubus.cart.read_cart_u16(RESET_VECTOR_LOC);
@@ -67,43 +72,43 @@ fn main() {
     let mut cpu = cpu::CPU::new(cpubus, pc as u16);
     // println!("{:#?}", cpu);
 
-    // let mut ticks = 0;
     // TODO: re-add specific run conditions for debugging
-
     let mut nmi = false;
+    let mut framestart = time::precise_time_ns();
     'main: loop {
-        let cpustart = time::precise_time_ns();
 
         let (op, instr) = cpu.read_instruction();
         if op == 0 {
             break;
         }
 
-
         // TODO: Move this to a specific debug output
-        // let debug = true;
         if false {
             cpu_debug(&op, &instr, &cpu);
         }
-
 
         cpu.cycle += instr.ticks as isize * PPU_MULTIPLIER;
 
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
-            nmi = cpu.bus.ppu.render_scanline();
+            cpu.bus.ppu.render_scanline();
+
+            if cpu.bus.ppu.extra_cycle {
+                cpu.cycle += 1;
+            }
 
             if cpu.bus.ppu.scanline == 240 {
                 render_frame(&cpu.bus.ppu.screen, &mut renderer, &mut texture);
 
+
                 // Frame limiter.
-                let mut frametime = time::precise_time_ns() - cpustart;
+                let mut frametime = time::precise_time_ns() - framestart;
                 // println!("Frame took {}", frametime);
                 if frametime < 16_666_667 {
                     frametime = 16_666_667 - frametime;
                     std::thread::sleep(std::time::Duration::new(0, frametime as u32));
                 }
-
+                framestart = time::precise_time_ns();
 
                 for event in events.poll_iter() {
                     match event {
@@ -116,64 +121,43 @@ fn main() {
             }
 
             if cpu.bus.ppu.scanline == -1 {
-                let keys: Vec<Keycode> = events.keyboard_state().pressed_scancodes().
-                                filter_map(Keycode::from_scancode).collect();
+                let keys: Vec<Keycode> = events.
+                                keyboard_state().
+                                pressed_scancodes().
+                                filter_map(Keycode::from_scancode).
+                                collect();
 
-                for key in keys {
-                    match key {
-                        Keycode::LCtrl => {
-                            // panic!("Works..");
-                            cpu.joy1 |= 1 << 0;
-                        }
-                        Keycode::LShift => {
-                            cpu.joy1 |= 1 << 1;
-                        }
-                        Keycode::Space => {
-                            cpu.joy1 |= 1 << 2;
-                        }
-                        Keycode::Return => {
-                            cpu.joy1 |= 1 << 3;
-                        }
-                        Keycode::Up => {
-                            cpu.joy1 |= 1 << 4;
-                        }
-                        Keycode::Down => {
-                            cpu.joy1 |= 1 << 5;
-                        }
-                        Keycode::Left => {
-                            cpu.joy1 |= 1 << 6;
-                        }
-                        Keycode::Right => {
-                            cpu.joy1 |= 1 << 7;
-                        }
-                        _ => ()// panic!("Unkown key {:?}", key),
-
-                    }
-                }
+                cpu.bus.joy.set_keys(keys);
             }
         }
 
-        cpu.execute_op(&op, &instr);
+        nmi = cpu.bus.ppu.tick(instr.ticks as isize * PPU_MULTIPLIER);
 
-        if !cpu.bus.ppu.sprite0_hit &&
-            cpu.bus.ppu.sprite0_dot != 0xFF &&
-            cpu.cycle > cpu.bus.ppu.sprite0_dot as isize
+
+        cpu.execute_op(&op, &instr);
+        // if !nmi {
+        // }
+/*        if !cpu.bus.ppu.sprite0_hit &&
+        cpu.bus.ppu.sprite0_dot != 0xFF &&
+        cpu.cycle >= cpu.bus.ppu.sprite0_dot as isize
         {
+            println!("Sprite 0 hit on sl {} dot {}", cpu.bus.ppu.scanline, cpu.bus.ppu.sprite0_dot);
             cpu.bus.ppu.sprite0_hit = true;
         }
+*/
+
+        // println!("cpu is at {} and PPU is at {}", cpu.cycle, cpu.bus.ppu.cycles);
+
         // If the cycle count isn't > 1 yet
         // then the vblank flag wouldn't have been set at this point
         // since vblank is set on dot 1 of line 341
-        if nmi && cpu.cycle > 2 {
+        if nmi { //&& cpu.cycle > 2 {
+            //    println!("NMI");
             cpu.nmi();
+            nmi = cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
             nmi = false;
         }
-
-
-
     }
-
-    // println!("run time is {}", time::precise_time_ns() - cpustart);
 }
 
 

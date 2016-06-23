@@ -76,6 +76,13 @@ pub struct Cart {
     pub mapper: u8,
 
     pub low_prg_bank: u8,
+
+    /*
+    _x8000_bank: u8,
+    _xA000_bank: u8,
+    _xC000_bank: u8,
+    _xE000_bank: u8,
+    */
 }
 
 impl Cart {
@@ -96,6 +103,18 @@ impl Cart {
 
             rom: romfile,
         }
+    }
+
+    pub fn write_cart_u8(&mut self, addr: u16, value: u8) {
+        if self.mapper == 0 {
+            // mapper 0 doesn't do anything afaik.
+        }
+        else if self.mapper == 2 {
+            self.low_prg_bank = value & 0xF;
+        } else {
+            panic!("Mapper {} is unimplemented", self.mapper);
+        }
+
     }
 
     pub fn read_cart_u8(&self, addr: u16) -> u8 {
@@ -142,8 +161,9 @@ impl Cart {
             }
             read_pos = ((addr as usize - PRG_ROM_UPPER_START as usize) + block + INES_OFFSET as usize) as usize;
         } else {
-            panic!("virtual memory address {:#X} is not in the PRG rom space",
-                   addr)
+            //panic!("virtual memory address {:#X} is not in the PRG rom space",
+            //       addr)
+            read_pos = 0;
         }
 
         read_pos
