@@ -73,7 +73,7 @@ fn main() {
     // println!("{:#?}", cpu);
 
     // TODO: re-add specific run conditions for debugging
-    let mut nmi = false;
+    let mut nmi:bool;
     let mut framestart = time::precise_time_ns();
     'main: loop {
 
@@ -88,18 +88,17 @@ fn main() {
         }
 
         cpu.cycle += instr.ticks as isize * PPU_MULTIPLIER;
+        nmi = cpu.bus.ppu.tick(instr.ticks as isize * PPU_MULTIPLIER);
+        if cpu.bus.ppu.extra_cycle {
+            cpu.cycle += 1;
+            cpu.bus.ppu.extra_cycle = false;
+        }
 
         if cpu.cycle >= 341 {
             cpu.cycle %= 341;
-            cpu.bus.ppu.render_scanline();
-
-            if cpu.bus.ppu.extra_cycle {
-                cpu.cycle += 1;
-            }
 
             if cpu.bus.ppu.scanline == 240 {
                 render_frame(&cpu.bus.ppu.screen, &mut renderer, &mut texture);
-
 
                 // Frame limiter.
                 let mut frametime = time::precise_time_ns() - framestart;
@@ -110,6 +109,7 @@ fn main() {
                 }
                 framestart = time::precise_time_ns();
 
+
                 for event in events.poll_iter() {
                     match event {
                         Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
@@ -118,9 +118,7 @@ fn main() {
                         _ => ()
                     }
                 }
-            }
 
-            if cpu.bus.ppu.scanline == -1 {
                 let keys: Vec<Keycode> = events.
                                 keyboard_state().
                                 pressed_scancodes().
@@ -131,31 +129,12 @@ fn main() {
             }
         }
 
-        nmi = cpu.bus.ppu.tick(instr.ticks as isize * PPU_MULTIPLIER);
-
-
         cpu.execute_op(&op, &instr);
-        // if !nmi {
-        // }
-/*        if !cpu.bus.ppu.sprite0_hit &&
-        cpu.bus.ppu.sprite0_dot != 0xFF &&
-        cpu.cycle >= cpu.bus.ppu.sprite0_dot as isize
-        {
-            println!("Sprite 0 hit on sl {} dot {}", cpu.bus.ppu.scanline, cpu.bus.ppu.sprite0_dot);
-            cpu.bus.ppu.sprite0_hit = true;
-        }
-*/
 
-        // println!("cpu is at {} and PPU is at {}", cpu.cycle, cpu.bus.ppu.cycles);
-
-        // If the cycle count isn't > 1 yet
-        // then the vblank flag wouldn't have been set at this point
-        // since vblank is set on dot 1 of line 341
-        if nmi { //&& cpu.cycle > 2 {
+        if nmi {
             //    println!("NMI");
             cpu.nmi();
-            nmi = cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
-            nmi = false;
+            cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
         }
     }
 }

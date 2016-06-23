@@ -42,8 +42,6 @@ pub struct PPU {
     pub sprite0_hit: bool,
     pub vblank: bool,
 
-
-    pub sprite0_dot: u8,
     // ppu_addr: u16,
     oam_addr: u8,
 
@@ -67,7 +65,6 @@ pub struct PPU {
     initial_reset: bool,
     nmi_generated: bool,
 
-    sprite0_prerender: [u8; 8],
     sprite0_bg_prerender: [u8; 256],
 
     pub screen: [[u32; 256]; 240],
@@ -75,6 +72,7 @@ pub struct PPU {
     pub framecount: usize,
     pub extra_cycle: bool,
     pub cycles: isize,
+    bg_column: isize,
 }
 
 impl PPU {
@@ -104,7 +102,6 @@ impl PPU {
             sprite0_hit: false,
             vblank: false,
 
-            sprite0_dot: 0xFF,
             // ppu_addr: 0,
             oam_addr: 0,
 
@@ -132,12 +129,12 @@ impl PPU {
             nmi_generated: false,
 
             screen: [[0; 256]; 240],
-            sprite0_prerender: [0; 8],
             sprite0_bg_prerender: [0; 256],
 
             framecount: 0,
             extra_cycle: false,
             cycles: 0,
+            bg_column: 0,
         }
     }
 
@@ -147,7 +144,7 @@ impl PPU {
 
         self.t_vram_addr &= 0x73FF;
         self.t_vram_addr |= (data as u16 & 3) << 10;
-        println!("Nametable set to {}", (data as u16 & 3));
+        // println!("Nametable set to {}", (data as u16 & 3));
         self.vram_increment = (data & (1 << 2)) != 0;
         self.sprite_table_high = (data & (1 << 3)) != 0;
         self.bg_table_high = (data & (1 << 4)) != 0;
@@ -217,7 +214,7 @@ impl PPU {
         self.lastwrite = data;
         if !self.w_toggle {
             self.fine_x = data & 0x7;
-            println!("Finex set to {} after SL {}", self.fine_x, self.scanline);
+        //    println!("Finex set to {} during SL {} at {}", self.fine_x, self.scanline, self.cycles);
             self.t_vram_addr &= 0xFFE0;
             self.t_vram_addr |= ((data & 0xF8) >> 3) as u16;
             // self.scroll_x = data;
@@ -353,8 +350,88 @@ impl PPU {
         }
     }
 
-// nametables contain offsets referring to patterns..
-    fn render_bg(&mut self) {
+
+
+    pub fn tick (&mut self, ticks: isize) -> bool {
+        for _tick in 0..ticks {
+            self.cycles += 1;
+            if self.cycles == 341 {
+                self.cycles = 0;
+                self.scanline += 1;
+                if self.scanline > 260 {
+                    self.scanline = -1;
+                }
+            }
+
+            if self.cycles == 1 {
+                if self.scanline == -1 {
+                    self.nmi_generated = false;
+                    self.sprite0_hit = false;
+                    self.vblank  = false;
+                    if self.initial_reset {self.initial_reset = false};
+                }
+                if self.scanline == 241 && !self.initial_reset {
+                    self.vblank = true;
+                }
+            }
+
+            if self.scanline >= 0 && self.scanline < 240 {
+                if self.cycles == 0 && self.show_bg {
+                    let bgcolor = PALETTE[self.palette[0] as usize % 64];
+                    self.screen[self.scanline as usize] = [bgcolor; 256];
+                    if !self.sprite0_hit && self.show_bg && self.show_sprites {
+                        self.sprite0_bg_prerender = [0; 256];
+                    }
+                }
+
+
+                if self.cycles <= 256 && self.cycles % 8 == 0 && self.show_bg {
+                    self.render_8pxbg();
+                    self.render_sprites();
+                    self.bg_column += 1;
+                }
+
+                if self.cycles == 257 && (self.show_bg || self.show_sprites)
+                {
+                    self.increment_y();
+                    // println!("reset X");
+                    // copy horizontal bits from t to v
+                    self.vram_addr &= 0x7BE0;
+                    self.vram_addr |= self.t_vram_addr & !0x7BE0;
+                    self.bg_column = 0;
+                }
+            }
+
+
+            if self.scanline == -1 && (self.show_bg || self.show_sprites)
+                && (self.cycles >= 280 && self.cycles <= 304)
+            {
+                self.vram_addr &= 0x041F;
+                self.vram_addr |= self.t_vram_addr & !0x041F;
+
+            }
+
+            if self.scanline == -1 && (self.show_bg || self.show_sprites) && self.cycles == 340 {
+                    self.extra_cycle = self.framecount % 2 == 1;
+                    if self.extra_cycle {
+                        self.cycles = 0;
+                    }
+                    self.framecount += 1;
+                    // println!("Frame# {}", self.framecount);
+            }
+
+        }
+
+        if self.vblank && self.nmi_enable && !self.nmi_generated && self.cycles > 2 {
+            // println!("NMI");
+            self.nmi_generated = true;
+            return true;
+        }
+        return false;
+
+    }
+
+    fn render_8pxbg(&mut self) {
         // TODO: use left 8px setting
         /*
         read the nametable at the base nametable address to lookup the tile
@@ -363,76 +440,65 @@ impl PPU {
         calculate the actual pixel colours from the bit-pair
         then use the palette data to assign each pixel a colour based on the calculation
         */
-        // using the PPU's actual functions for this should be correct..
+        // using the PPU's actual functions for this should be correct.
+
+        let coarsex = self.vram_addr & 0x1F;
+        let coarsey = (self.vram_addr >> 5) & 0x1F;
+        // let col = coarsex;
+        // let sl = ((coarsey << 3) | self.vram_addr >> 12) as i16;
+        // println!("sl {} and sl-y {} coarsex {}", self.scanline, sl, coarsex);
         let sl = self.scanline;
-        let endcol = if self.fine_x != 0 {
-            33
-        } else {
-            32
-        };
+        let att_tbl_addr = 0x23C0 |
+                            (self.vram_addr & 0x0C00) |
+                            ((self.vram_addr >> 4) & 0x38) |
+                            ((self.vram_addr >> 2) & 0x07);
 
-        for col in 0..endcol {
-            let coarsex = self.vram_addr & 0x1F;
-            let coarsey = (self.vram_addr >> 5) & 0x1F;
-
-            let att_tbl_addr = 0x23C0 |
-                                (self.vram_addr & 0x0C00) |
-                                ((self.vram_addr >> 4) & 0x38) |
-                                ((self.vram_addr >> 2) & 0x07);
-
-            let attr_table = &self.read_data(att_tbl_addr);
-            // println!("Attr table is {:#X} read from {:#X}", attr_table, att_tbl_addr);
-            let attr:usize;
-            if (coarsey % 4) < 2 {
-                if (coarsex % 4) < 2 {
-                    attr = ((attr_table & 0b0000_0011) >> 0) as usize;
-                } else {
-                    attr = ((attr_table & 0b0000_1100) >> 2) as usize;
-                }
+        let attr_table = &self.read_data(att_tbl_addr);
+        // println!("Attr table is {:#X} read from {:#X}", attr_table, att_tbl_addr);
+        let attr:usize;
+        if (coarsey % 4) < 2 {
+            if (coarsex % 4) < 2 {
+                attr = ((attr_table & 0b0000_0011) >> 0) as usize;
             } else {
-                if (coarsex % 4) < 2 {
-                    attr = ((attr_table & 0b0011_0000) >> 4) as usize;
-                } else {
-                    attr = ((attr_table & 0b1100_0000) >> 6) as usize;
-                }
+                attr = ((attr_table & 0b0000_1100) >> 2) as usize;
             }
-
-            let nametable_addr = 0x2000 | (self.vram_addr & 0x0FFF);
-            let mut tile_addr = self.read_data(nametable_addr) as u16 * 16;
-            if self.bg_table_high {
-                tile_addr += 0x1000
+        } else {
+            if (coarsex % 4) < 2 {
+                attr = ((attr_table & 0b0011_0000) >> 4) as usize;
+            } else {
+                attr = ((attr_table & 0b1100_0000) >> 6) as usize;
             }
-            let offset = self.vram_addr >> 12;
-            let tile_data1 = self.read_data(tile_addr + offset);
-            let tile_data2 = self.read_data(tile_addr + 8 + offset);
+        }
 
-            // let start = time::precise_time_ns();
-            for mut px in 0..8 {
-                let pixel_x = (col as isize * 8) - self.fine_x as isize + px as isize;
-                if pixel_x <= 255 && pixel_x >= 0 {
-                    px = 7 - px;
-                    let pv = ((tile_data2 & (1 << px)) >> px) << 1 | (tile_data1 & (1 << px)) >> px;
-                    if pv > 0 {
-                        let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize % 64];
-                        self.screen[sl as usize][pixel_x as usize] = pixel;
+        let nametable_addr = 0x2000 | (self.vram_addr & 0x0FFF);
+        let mut tile_addr = self.read_data(nametable_addr) as u16 * 16;
+        if self.bg_table_high {
+            tile_addr += 0x1000
+        }
+        let offset = self.vram_addr >> 12;
+        let tile_data1 = self.read_data(tile_addr + offset);
+        let tile_data2 = self.read_data(tile_addr + 8 + offset);
 
-                        if self.sprite0_dot == 0xFF && sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 {
-                            self.sprite0_bg_prerender[pixel_x as usize] = pv;
-                        }
+        // let start = time::precise_time_ns();
+        for mut px in 0..8 {
+            let pixel_x = (self.bg_column * 8) - self.fine_x as isize + px as isize;
+        //    println!("PixelX {}", pixel_x);
+            if pixel_x <= 255 && pixel_x >= 0 {
+                px = 7 - px;
+                let pv = ((tile_data2 & (1 << px)) >> px) << 1 | (tile_data1 & (1 << px)) >> px;
+                if pv > 0 {
+                    let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize % 64];
+                    self.screen[sl as usize][pixel_x as usize] = pixel;
+
+                    if sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 {
+                        self.sprite0_bg_prerender[pixel_x as usize] = pv;
                     }
                 }
             }
-            // let end = time::precise_time_ns();
-            self.increment_x();
-
-
-           // println!("{} to render 8px", end - start);
         }
-        // println!("universal BG is {:#X}", bgcolor);
+        // let end = time::precise_time_ns();
+        self.increment_x();
     }
-
-
-
 
     fn render_sprites(&mut self) {
         // TODO: deal with more than 8 sprites on a scanline
@@ -489,156 +555,18 @@ impl PPU {
                             PALETTE[plt % 64]
                         };
                         self.screen[sl as usize][x as usize + px as usize] = pixel;
-                    }
-                    if sprite == 0 && self.sprite0_dot == 0xFF && !self.sprite0_hit {
-                        self.sprite0_prerender[px] = pv;
+                        if sprite == 0 && !self.sprite0_hit && (x as usize + px as usize) < 255 &&
+                             self.sprite0_bg_prerender[x as usize + px as usize] != 0
+                        {
+                                self.sprite0_hit = true;
+
+                        }
                     }
                 }
             }
         }
     }
 
-
-    pub fn tick (&mut self, ticks: isize) -> bool {
-        for tick in 0..ticks {
-            self.cycles += 1;
-            if self.cycles == 341 {
-                self.cycles = 0;
-            }
-            if !self.sprite0_hit &&
-            self.sprite0_dot != 0xFF &&
-            self.cycles == self.sprite0_dot as isize
-            {
-                println!("Sprite 0 hit on sl {} dot {}", self.scanline, self.sprite0_dot);
-                self.sprite0_hit = true;
-            }
-            match self.cycles {
-                1 => {
-                    if self.scanline == -1 {
-                        self.nmi_generated = false;
-                        self.sprite0_hit = false;
-                        self.sprite0_dot = 0xFF;
-                        self.vblank  = false;
-                        if self.initial_reset {self.initial_reset = false};
-                    }
-                    if self.scanline == 241 && !self.initial_reset {
-                        self.vblank = true;
-                    }
-                }
-                _ => {}
-            }
-
-
-        }
-        if self.vblank && self.nmi_enable && !self.nmi_generated && self.cycles > 2 {
-            // println!("NMI");
-            self.nmi_generated = true;
-            return true;
-        }
-        return false;
-
-    }
-
-
-    pub fn render_scanline(&mut self) -> bool {
-
-        self.scanline += 1;
-        if self.scanline > 260 {
-            self.scanline = -1;
-
-
-
-//            self.nmi_generated = false;
-//            self.sprite0_hit = false;
-//            self.sprite0_dot = 0xFF;
-//            self.vblank  = false;
-
-            // copy Vertical bits from t to v
-            if self.show_bg || self.show_sprites {
-                self.vram_addr &= 0x041F;
-                self.vram_addr |= self.t_vram_addr & !0x041F;
-
-            }
-
-        }
-
-
-        if self.scanline >= 0 && self.scanline < 240 {
-            if  self.show_bg || self.show_sprites {
-                let bgcolor = PALETTE[self.palette[0] as usize % 64];
-                self.screen[self.scanline as usize] = [bgcolor; 256];
-            }
-
-            if self.scanline == 0 && self.show_bg {
-                // print!("Frame# {}\r\n", self.framecount);
-                // this actually happens on the very end of -1
-                // but doing it at 0 is better timing
-                self.extra_cycle = self.framecount % 2 == 1;
-                if self.extra_cycle {
-                    self.cycles += 1;
-                }
-                self.framecount += 1;
-            } else {
-                self.extra_cycle = false;
-            }
-
-
-            if self.sprite0_dot == 0xFF && !self.sprite0_hit && self.show_bg && self.show_sprites {
-                self.sprite0_prerender = [0; 8];
-                self.sprite0_bg_prerender = [0; 256];
-            }
-
-            // let each function run the whole scanline and paint 'over' eachother
-            if self.show_bg {
-                self.render_bg();
-            }
-            if self.show_sprites {
-                self.render_sprites();
-            }
-
-
-            if self.show_bg || self.show_sprites {
-                self.increment_y();
-
-                // copy horizontal bits from t to v
-                self.vram_addr &= 0x7BE0;
-                self.vram_addr |= self.t_vram_addr & !0x7BE0;
-            }
-
-            if self.sprite0_dot == 0xFF && !self.sprite0_hit && self.show_bg && self.show_sprites {
-
-                let px0 = self.oam[3] as usize;
-                for x in 0..8 {
-                    let offset = px0 + x;
-                    let ls = if offset > 254 {
-                        0
-                    } else {
-                        self.sprite0_bg_prerender[offset]
-                    };
-
-                    if  ls != 0 && self.sprite0_prerender[x] != 0 {
-                        self.sprite0_dot = offset as u8;
-                        // println!("hit on scanline {} on dot {}", self.scanline, offset);
-                    }
-                }
-            }
-
-        }
-
-
-        if self.scanline == 241 && !self.initial_reset {
-//            self.vblank = true;
-            // println!("sprite0 {:?}", self.sprite0_hit);
-        }
-
-//        if self.vblank && self.nmi_enable && !self.nmi_generated{
-//            // println!("NMI");
-//            self.nmi_generated = true;
-//            return true;
-//        }
-
-        false
-    }
 
     fn increment_y(&mut self) {
         // y increment V....
