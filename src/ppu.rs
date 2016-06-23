@@ -40,6 +40,7 @@ pub struct PPU {
     // PPUSTATUS $2002
     sprite_overflow: bool,
     pub sprite0_hit: bool,
+    sprite0_to_be_hit: bool,
     pub vblank: bool,
 
     // ppu_addr: u16,
@@ -58,7 +59,7 @@ pub struct PPU {
 
     palette: Box<[u8]>,
     vram: Box<[u8]>,
-    chr: cart::ChrRom,
+    pub chr: cart::ChrRom,
 
     pub lastwrite: u8,
     ppudata_buffer: u8,
@@ -100,6 +101,7 @@ impl PPU {
             // PPUSTATUS $2002
             sprite_overflow: false,
             sprite0_hit: false,
+            sprite0_to_be_hit: false,
             vblank: false,
 
             // ppu_addr: 0,
@@ -362,6 +364,16 @@ impl PPU {
                     self.scanline = -1;
                 }
             }
+            if self.scanline == -1 && self.show_bg && self.cycles == 340 {
+                self.extra_cycle = self.framecount % 2 == 1;
+                if self.extra_cycle {
+                    self.cycles = 0;
+                    self.scanline += 1;
+                }
+                self.framecount += 1;
+                // println!("Frame# {}", self.framecount);
+            }
+
 
             if self.cycles == 1 {
                 if self.scanline == -1 {
@@ -387,8 +399,15 @@ impl PPU {
 
                 if self.cycles <= 256 && self.cycles % 8 == 0 && self.show_bg {
                     self.render_8pxbg();
-                    self.render_sprites();
+                    if self.show_sprites {
+                        self.render_sprites();
+                    }
                     self.bg_column += 1;
+                }
+
+                if self.cycles > 2 && self.sprite0_to_be_hit {
+                    self.sprite0_hit = true;
+                    self.sprite0_to_be_hit = false;
                 }
 
                 if self.cycles == 257 && (self.show_bg || self.show_sprites)
@@ -411,14 +430,6 @@ impl PPU {
 
             }
 
-            if self.scanline == -1 && (self.show_bg || self.show_sprites) && self.cycles == 340 {
-                    self.extra_cycle = self.framecount % 2 == 1;
-                    if self.extra_cycle {
-                        self.cycles = 0;
-                    }
-                    self.framecount += 1;
-                    // println!("Frame# {}", self.framecount);
-            }
 
         }
 
@@ -558,7 +569,7 @@ impl PPU {
                         if sprite == 0 && !self.sprite0_hit && (x as usize + px as usize) < 255 &&
                              self.sprite0_bg_prerender[x as usize + px as usize] != 0
                         {
-                                self.sprite0_hit = true;
+                                self.sprite0_to_be_hit = true;
 
                         }
                     }

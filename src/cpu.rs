@@ -857,7 +857,10 @@ impl CPU {
 
             JOY1 => self.bus.joy.strobe_joy(value),
 
-            EXPANSION_ROM_START...PRG_ROM_END => self.bus.cart.write_cart_u8(addr, value),
+            EXPANSION_ROM_START...PRG_ROM_END => {
+                self.bus.cart.write_cart_u8(addr, value, &mut self.bus.ppu.chr);
+                // self.bus.ppu.chr.write_mapper(addr, value);
+            }
 
             _ => {panic!("Invalid write location {:#X}", addr);},
         }

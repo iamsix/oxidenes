@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Read;
 
 use mem_map::*;
-const INES_OFFSET: u16 = 0x10;
+const INES_OFFSET: usize = 0x10;
 
 #[derive(Debug)]
 pub struct ChrRom {
@@ -15,7 +15,20 @@ pub struct ChrRom {
     pub vertical_mirroring: bool,
     pub four_screen_vram: bool,
 
-    _mapper: u8,
+    mapper: u8,
+
+// offset addresses, defined during the write stage
+/*
+    chr_bank_0000: usize,
+    chr_bank_0400: usize,
+    chr_bank_0800: usize,
+    chr_bank_0C00: usize,
+    chr_bank_1000: usize,
+    chr_bank_1400: usize,
+    chr_bank_1800: usize,
+    chr_bank_1C00: usize,
+    */
+    bank: u8,
 }
 
 // TODO: separate rom_file reads to read only the relevant parts
@@ -33,9 +46,10 @@ impl ChrRom {
             four_screen_vram: romfile[6] & (2 << 3) != 0,
             //           prg_ram_present: false,
             //           trainer: false,
-            _mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
+            mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
 
             rom: vec![0; 0x2000].into_boxed_slice(),
+            bank: 0,
         };
 
         if chr.chr_rom_banks != 0 {
@@ -50,19 +64,20 @@ impl ChrRom {
 
     pub fn read_u8(&self, addr: u16) -> u8 {
         // TODO: MAPPERS!
-        self.rom[addr as usize]
+        self.rom[addr as usize + (self.bank as usize * 0x2000)]
     }
 
     pub fn write_u8(&mut self, addr:u16, data: u8) {
 
-        self.rom[addr as usize] = data;
+        self.rom[addr as usize + (self.bank as usize * 0x2000)] = data;
     }
-}
 
+}
 
 
 pub struct Cart {
     rom: Box<[u8]>,
+    prg_ram: Box<[u8]>,
 
     prg_rom_banks: u8,
     chr_rom_banks: u8,
@@ -77,19 +92,46 @@ pub struct Cart {
 
     pub low_prg_bank: u8,
 
-    /*
-    _x8000_bank: u8,
-    _xA000_bank: u8,
-    _xC000_bank: u8,
-    _xE000_bank: u8,
-    */
+    prg_bank_8000: usize,
+    prg_bank_A000: usize,
+    prg_bank_C000: usize,
+    prg_bank_E000: usize,
+
 }
 
 impl Cart {
     pub fn new(rompath: &String) -> Cart {
         let romfile = read_rom_file(rompath);
+        let mapper = (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000;
+        let rom_banks = romfile[4];
+        let prg_bank_8000: usize;
+        let prg_bank_A000: usize;
+        let prg_bank_C000: usize;
+        let prg_bank_E000: usize;
+        match mapper {
+            0 | 3 => {
+                prg_bank_8000 = 0x0000;
+                prg_bank_A000 = 0x2000;
+                if rom_banks == 1 {
+                    prg_bank_C000 = 0x0000;
+                    prg_bank_E000 = 0x2000;
+                } else {
+                    prg_bank_C000 = 0x4000;
+                    prg_bank_E000 = 0x6000;
+                }
+            }
+            2 => {
+                prg_bank_8000 = 0x0000;
+                prg_bank_A000 = 0x2000;
+                prg_bank_C000 = (1024 * 16) * (rom_banks as usize - 1);
+                prg_bank_E000 = ((1024 * 16) * (rom_banks as usize - 1)) + 0x2000;
+            }
+            _ => {panic!("Mapper {} not supported", mapper)}
+
+        }
+
         Cart {
-            prg_rom_banks: romfile[4],
+            prg_rom_banks: rom_banks,
             chr_rom_banks: romfile[5],
             prg_ram_chunks: romfile[8],
 
@@ -98,79 +140,72 @@ impl Cart {
             four_screen_vram: romfile[6] & (2 << 3) != 0,
             //           prg_ram_present: false,
             //           trainer: false,
-            mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
+            mapper: mapper,
             low_prg_bank: 0,
-
+            prg_ram: vec![0; 0x2000].into_boxed_slice(),
             rom: romfile,
+
+            prg_bank_8000: prg_bank_8000,
+            prg_bank_A000: prg_bank_A000,
+            prg_bank_C000: prg_bank_C000,
+            prg_bank_E000: prg_bank_E000,
+
         }
     }
 
-    pub fn write_cart_u8(&mut self, addr: u16, value: u8) {
-        if self.mapper == 0 {
-            // mapper 0 doesn't do anything afaik.
-        }
-        else if self.mapper == 2 {
-            self.low_prg_bank = value & 0xF;
-        } else {
-            panic!("Mapper {} is unimplemented", self.mapper);
+    pub fn write_cart_u8(&mut self, addr: u16, value: u8, chr: &mut ChrRom) {
+
+        match addr {
+            SRAM_START...SRAM_END => {
+                // TODO: some mappers have more than 8kb
+                let real_addr = (addr - SRAM_START) as usize;
+                self.prg_ram[real_addr] = value;
+            }
+            PRG_ROM_START...PRG_ROM_END => {
+                match self.mapper {
+                    0 => {}
+                    1 => panic!("MMC1 unimplemented"),
+                    2 => {
+                        let bank = (value & 0xF) as usize;
+                        self.prg_bank_8000 = bank * (1024 * 16);
+                        self.prg_bank_A000 = (bank * (1024 * 16)) + 0x2000;
+                    },
+                    3 => chr.bank = value & 0xF,
+                    _ => panic!("Mapper {} is unimplemented", self.mapper),
+                }
+            }
+            _ => {panic!("tried to write to {:#X}", addr)}
+
         }
 
     }
 
     pub fn read_cart_u8(&self, addr: u16) -> u8 {
         let read_pos = self.map_rom(addr);
-        // println!("Read position {:#x}", read_pos)
         let value = self.rom[read_pos];
-        // println!("Read byte: {:#x} from {:#x}", value, read_pos);
+//        println!("Read byte: {:#x} from {:#x}", value, read_pos);
         value
     }
 
     pub fn read_cart_u16(&self, addr: u16) -> u16 {
         let read_pos = self.map_rom(addr);
         let value = ((self.rom[read_pos + 1] as u16) << 8 | (self.rom[read_pos] as u16)) as u16;
-        // println!("Read 2 bytes: {:#x}", value);
+//        println!("Read u16: {:#x} from {:#x}", value, read_pos);
         value
     }
 
     fn map_rom(&self, addr: u16) -> usize {
-
         //        println!("Read Address: {:#x}", addr);
-
-        let read_pos: usize;
-
-        if addr >= PRG_ROM_LOWER_START && addr < PRG_ROM_LOWER_START + PRG_ROM_LOWER_LEN {
-            let block:usize = if self.mapper == 0 {
-                0
-            } else if self.mapper == 2 {
-                (1024 * 16) * self.low_prg_bank as usize
-            } else {
-                0
-            };
-
-            read_pos = ((addr as usize - PRG_ROM_LOWER_START as usize) + block + INES_OFFSET as usize) as usize;
-        } else if addr >= PRG_ROM_UPPER_START && addr <= PRG_ROM_UPPER_START + (PRG_ROM_UPPER_LEN - 1) {
-            // UPPER BLOCK
-            let mut block = 0;
-            if self.prg_rom_banks > 1 {
-                // TODO: MAPPERS!!
-                if self.mapper == 0 {
-                    block = 1024 * 16;
-                } else if self.mapper == 2 {
-                    block = 1024 * 16 * (self.prg_rom_banks as usize - 1);
-                }
-            }
-            read_pos = ((addr as usize - PRG_ROM_UPPER_START as usize) + block + INES_OFFSET as usize) as usize;
-        } else {
-            //panic!("virtual memory address {:#X} is not in the PRG rom space",
-            //       addr)
-            read_pos = 0;
+        match addr {
+            0x8000...0x9FFF => {(addr as usize - 0x8000) + self.prg_bank_8000 + INES_OFFSET}
+            0xA000...0xBFFF => {(addr as usize - 0xA000) + self.prg_bank_A000 + INES_OFFSET}
+            0xC000...0xDFFF => {(addr as usize - 0xC000) + self.prg_bank_C000 + INES_OFFSET}
+            0xE000...0xFFFF => {(addr as usize - 0xE000) + self.prg_bank_E000 + INES_OFFSET}
+            _ => {panic!("not in rom space {:#X}", addr)}
         }
-
-        read_pos
     }
 }
 
-// TODO: Read rom file path from args
 fn read_rom_file(rompath: &String) -> Box<[u8]> {
     let mut rom_file = File::open(rompath).unwrap();
     let mut rom_buffer = Vec::new();

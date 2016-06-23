@@ -40,10 +40,6 @@ pub const EXPANSION_ROM_END: u16 = 0x5FFF;
 pub const SRAM_START: u16 = 0x6000;
 pub const SRAM_END: u16 = 0x7FFF;
 
-pub const PRG_ROM_LOWER_START: u16 = 0x8000;
-pub const PRG_ROM_LOWER_LEN: u16 = 0x4000;
-pub const PRG_ROM_UPPER_START: u16 = 0xc000;
-pub const PRG_ROM_UPPER_LEN: u16 = 0x4000;
 pub const PRG_ROM_START: u16 = 0x8000;
 pub const PRG_ROM_END: u16 = 0xFFFF;
 

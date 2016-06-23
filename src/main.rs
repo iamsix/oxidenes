@@ -79,6 +79,7 @@ fn main() {
 
         let (op, instr) = cpu.read_instruction();
         if op == 0 {
+            println!("BRK, quitting!");
             break;
         }
 
