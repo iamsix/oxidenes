@@ -4,7 +4,8 @@ extern crate time;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::keyboard::Keycode;
 use sdl2::event::Event;
-
+use sdl2::audio::{AudioCallback, AudioSpecDesired};
+use std::sync::{Arc, Mutex};
 // use time;
 
 use std::env;
@@ -33,6 +34,28 @@ pub struct Bus {
     joy: joy::Joy,
 }
 
+pub struct ApuOut {
+    phase: Arc<Mutex<Vec<f32>>>,
+    buff_pos: usize,
+}
+
+impl AudioCallback for ApuOut {
+    type Channel = f32;
+    fn callback(&mut self, out: &mut [f32]) {
+        // buffer prevents pops when underflowing the actual output
+        // it will make the sound very slgihtly wrong on underflow
+        // but it sounds better than a pop
+        let mut sample: f32 = 0.0;
+        let mut buffer: f32;
+        for x in out.iter_mut() {
+            buffer = sample;
+            sample = self.phase.lock().unwrap().pop().unwrap_or(-1.0);
+            if sample == -1.0 {sample = buffer};
+            *x = sample;
+        }
+    }
+}
+
 fn main() {
     let rompath = env::args().nth(1).unwrap_or(String::from("smb.nes"));
 
@@ -50,11 +73,20 @@ fn main() {
                                                         240).unwrap();
     let mut events = sdl.event_pump().unwrap();
 
+    let audio_subsystem = sdl.audio().unwrap();
+    let desired_spec = AudioSpecDesired {
+        freq: Some(44100),
+        channels: Some(1),  // mono
+        samples: None,       // default sample size
+    };
+
+
 
     let cart = cart::Cart::new(&rompath);
     println!("{:#?}", cart);
     let chr_rom = cart::ChrRom::new(&rompath);
     let apu = apu::APU::new();
+
 
     let ppu = ppu::PPU::new(chr_rom);
     let joy = joy::Joy::new();
@@ -72,6 +104,18 @@ fn main() {
     let mut cpu = cpu::CPU::new(cpubus, pc as u16);
     // println!("{:#?}", cpu);
 
+    let device = audio_subsystem.open_playback(None, &desired_spec, |spec| {
+        // Show obtained AudioSpec
+        println!("{:?}", spec);
+
+        // initialize the audio callback
+        ApuOut {
+            phase: cpu.bus.apu.output.clone(),
+            buff_pos: 0,
+        }
+    }).unwrap();
+    device.resume();
+    // println!("{:?}", device);
     // TODO: re-add specific run conditions for debugging
     let mut nmi:bool;
     let mut framestart = time::precise_time_ns();
@@ -132,13 +176,19 @@ fn main() {
 
         cpu.execute_op(&op, &instr);
 
+        // TODO: IRQ from apu
+        cpu.bus.apu.tick(instr.ticks as isize);
+        // if cpu.bus.apu.buff_ctr == 2047 device.resume();
+
         if nmi {
             //    println!("NMI");
             cpu.nmi();
             cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
+            cpu.bus.apu.tick(7);
         }
     }
 }
+
 
 
 fn cpu_debug (op: &u8, instr: &opcodes::Instruction, cpu: &cpu::CPU) {

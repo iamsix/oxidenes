@@ -174,34 +174,36 @@ impl Cart {
                     _ => panic!("Mapper {} is unimplemented", self.mapper),
                 }
             }
-            _ => {panic!("tried to write to {:#X}", addr)}
+            _ => {println!("tried to write to {:#X}", addr)}
 
         }
 
     }
 
     pub fn read_cart_u8(&self, addr: u16) -> u8 {
-        let read_pos = self.map_rom(addr);
-        let value = self.rom[read_pos];
+        //let read_pos = self.map_rom(addr as usize);
+        let value = self.rom[self.map_rom(addr as usize)];
 //        println!("Read byte: {:#x} from {:#x}", value, read_pos);
         value
     }
 
     pub fn read_cart_u16(&self, addr: u16) -> u16 {
-        let read_pos = self.map_rom(addr);
+        let read_pos = self.map_rom(addr as usize);
         let value = ((self.rom[read_pos + 1] as u16) << 8 | (self.rom[read_pos] as u16)) as u16;
 //        println!("Read u16: {:#x} from {:#x}", value, read_pos);
         value
     }
 
-    fn map_rom(&self, addr: u16) -> usize {
+    fn map_rom(&self, addr: usize) -> usize {
         //        println!("Read Address: {:#x}", addr);
         match addr {
-            0x8000...0x9FFF => {(addr as usize - 0x8000) + self.prg_bank_8000 + INES_OFFSET}
-            0xA000...0xBFFF => {(addr as usize - 0xA000) + self.prg_bank_A000 + INES_OFFSET}
-            0xC000...0xDFFF => {(addr as usize - 0xC000) + self.prg_bank_C000 + INES_OFFSET}
-            0xE000...0xFFFF => {(addr as usize - 0xE000) + self.prg_bank_E000 + INES_OFFSET}
-            _ => {panic!("not in rom space {:#X}", addr)}
+            0x8000...0x9FFF => {(addr - 0x8000) + self.prg_bank_8000 + INES_OFFSET}
+            0xA000...0xBFFF => {(addr - 0xA000) + self.prg_bank_A000 + INES_OFFSET}
+            0xC000...0xDFFF => {(addr - 0xC000) + self.prg_bank_C000 + INES_OFFSET}
+            0xE000...0xFFFF => {(addr - 0xE000) + self.prg_bank_E000 + INES_OFFSET}
+            _ => {println!("not in rom space {:#X}", addr);
+                0
+            }
         }
     }
 }

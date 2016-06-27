@@ -776,7 +776,7 @@ impl CPU {
             PPUDATA => self.bus.ppu.read_ppudata(),
             OAMDATA => self.bus.ppu.read_oamdata(),
 
-            SND_CHN => 0,
+            SND_CHN => self.bus.apu.read_status_reg(),
             // TODO: implement joysticks
             JOY1 => self.bus.joy.read_joy1(),
             JOY2 => 0,
@@ -835,7 +835,7 @@ impl CPU {
             PPUADDR => self.bus.ppu.write_ppuaddr(value),
             PPUDATA => self.bus.ppu.write_ppudata(value),
 
-            APU_REGISTERS_START...APU_REGISTERS_END | SND_CHN | JOY2 => {
+            APU_REGISTERS_START...APU_REGISTERS_END | SND_CHN | FRAME_TIMER => {
                 self.bus.apu.write(addr, value);
             }
 
@@ -853,6 +853,11 @@ impl CPU {
                 self.cycle %= 341;
                 self.bus.ppu.cycles = self.cycle;
                 self.bus.ppu.scanline += 5;
+
+                // unlike the ppu the apu actually needs to tick instead of faking it.
+                self.bus.apu.tick(513);
+
+
             }
 
             JOY1 => self.bus.joy.strobe_joy(value),

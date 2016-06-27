@@ -29,6 +29,7 @@ pub const OAMDMA:u16 = 0x4014;
 pub const APU_REGISTERS_START: u16 = 0x4000;
 pub const APU_REGISTERS_END: u16 = 0x4013;
 pub const SND_CHN: u16 = 0x4015;
+pub const FRAME_TIMER: u16 = 0x4017;
 // http://wiki.nesdev.com/w/index.php/2A03
 
 pub const JOY1: u16 = 0x4016;
