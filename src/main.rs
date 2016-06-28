@@ -6,6 +6,8 @@ use sdl2::keyboard::Keycode;
 use sdl2::event::Event;
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 use std::sync::{Arc, Mutex};
+// use std::sync::mpsc::channel;
+// use std::sync::mpsc::Receiver;
 // use time;
 
 use std::env;
@@ -36,7 +38,7 @@ pub struct Bus {
 
 pub struct ApuOut {
     phase: Arc<Mutex<Vec<f32>>>,
-    buff_pos: usize,
+//    rx: Receiver<f32>,
 }
 
 impl AudioCallback for ApuOut {
@@ -52,6 +54,8 @@ impl AudioCallback for ApuOut {
             sample = self.phase.lock().unwrap().pop().unwrap_or(-1.0);
             if sample == -1.0 {sample = buffer};
             *x = sample;
+
+        //    *x = self.rx.try_recv().unwrap_or(0.0);
         }
     }
 }
@@ -77,14 +81,15 @@ fn main() {
     let desired_spec = AudioSpecDesired {
         freq: Some(44100),
         channels: Some(1),  // mono
-        samples: None,       // default sample size
+        samples: Some(441),       // default sample size
     };
 
-
+    // let (tx, rx) = channel();
 
     let cart = cart::Cart::new(&rompath);
     println!("{:#?}", cart);
     let chr_rom = cart::ChrRom::new(&rompath);
+    // let apu = apu::APU::new(tx);
     let apu = apu::APU::new();
 
 
@@ -111,7 +116,7 @@ fn main() {
         // initialize the audio callback
         ApuOut {
             phase: cpu.bus.apu.output.clone(),
-            buff_pos: 0,
+        //    rx: rx,
         }
     }).unwrap();
     device.resume();
