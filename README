@@ -1,4 +1,7 @@
 OxideNES 
 A NES emulator in Rust. 
 
-CPU is fully emulated, currently working PPU interaction and rendering.
+CPU should be accurate, PPU is mostly accurate, timing between the 2 is off for some corner cases and hardware quirks. APU mostly functions but uses low quality/inaccurate downsampling.
+
+usage:
+oxidenes /path/to/rom

@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 // use std::sync::mpsc::Sender;
-
-const APU_STATUS_REG: u16 = 0x4015;
+use cart::Cart;
 
 const LEN_TABLE: [u8;32] = [
     10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
@@ -14,8 +13,7 @@ pub struct APU {
     pulse1: Pulse,
     pulse2: Pulse,
     noise: Noise,
-
-    dmc_en: bool,
+    dmc: Dmc,
 
     frame_clock: usize,
     interrupt_disable: bool,
@@ -30,6 +28,7 @@ pub struct APU {
 //    output2: Sender<f32>,
     buff_ctr: usize,
     out_ctr: usize,
+
 }
 
 const STEP1: usize = 7457;
@@ -46,6 +45,7 @@ impl APU {
         let pulse1 = Pulse::new(true);
         let pulse2 = Pulse::new(false);
         let noise = Noise::new();
+        let dmc = Dmc::new();
 
         let mut pmt: [f32; 31] = [0.0; 31];
         pmt[0] = 0.0;
@@ -63,7 +63,7 @@ impl APU {
             pulse1: pulse1,
             pulse2: pulse2,
             noise: noise,
-            dmc_en: false,
+            dmc: dmc,
 
             frame_clock: 0,
             interrupt_disable: false,
@@ -81,7 +81,8 @@ impl APU {
         }
     }
 
-    pub fn tick(&mut self, ticks: isize) {
+    pub fn tick(&mut self, ticks: isize, cart: &Cart) {
+
         for _ in 0..ticks {
             self.frame_clock = (self.frame_clock + 1) % 29830;
             // 5-step frame clock goes up to 37282..
@@ -115,6 +116,11 @@ impl APU {
                 self.triangle.generate_triangle();
             }
 
+            self.dmc.period_counter -= 1;
+            if self.dmc.period_counter == 0 {
+                self.dmc.period_counter = self.dmc.period + 1;
+                self.dmc.play_dmc(cart);
+            }
 
             if self.frame_clock % 41 == 0 {
                 let output = self.pulse_mix_table[
@@ -124,7 +130,7 @@ impl APU {
                             ] + self.tri_noise_dmc_mix_table[
                                 3 * self.triangle.output as usize +
                                 2 * self.noise.output as usize +
-                                0 // DMC is not multiplied
+                                self.dmc.output // DMC is not multiplied
                             ];
                 self.output.lock().unwrap().insert(0, output);
                 // self.output2.send(output);
@@ -199,7 +205,12 @@ impl APU {
             0x0E => self.noise.write_400e(value),
             0x0F => self.noise.write_400f(value),
 
-            0x15 => self.write_status_reg(value),
+            0x10 => self.dmc.write_4010(value),
+            0x11 => self.dmc.write_4011(value),
+            0x12 => self.dmc.write_4012(value),
+            0x13 => self.dmc.write_4013(value),
+
+//            0x15 => self.write_status_reg(value),
             0x17 => {
                 self.four_step = (value & (1 << 7)) != 0;
                 self.interrupt_disable = (value & (1 << 6)) != 0;
@@ -213,12 +224,17 @@ impl APU {
 
 
         // DMC Interrupt
+        if self.dmc.irq {
+            value |= 1 << 7;
+        }
 
         if self.interrupt {
             value |= 1 << 6;
         }
 
-        // DMC Active
+        if self.dmc.bytes_remaining > 0 {
+            value |= 1 << 4;
+        }
 
         if self.noise.length > 0 {
             value |= 1 << 3;
@@ -233,13 +249,23 @@ impl APU {
             value |= 1 << 0;
         }
         self.interrupt = false;
-        println!("APU status read - possibly wrong value returned");
+
         value
     }
 
-    fn write_status_reg(&mut self, value: u8) {
-        self.dmc_en = (value & (1 << 4)) != 0;        //D
-
+    pub fn write_status_reg(&mut self, value: u8, cart: &Cart) {
+        self.dmc.enabled = (value & (1 << 4)) != 0;        //D
+        if !self.dmc.enabled {
+            self.dmc.bytes_remaining = 0
+        } else {
+            if self.dmc.bytes_remaining == 0 {
+                self.dmc.sample_addr = self.dmc.sample_start_addr;
+                self.dmc.bytes_remaining = self.dmc.sample_len;
+                if !self.dmc.sample_has_data {
+                    self.dmc.load_dmc_sample(cart);
+                }
+            }
+        }
 
         self.noise.enabled = (value & (1 << 3)) != 0;   //N
         if !self.noise.enabled {self.noise.length = 0};
@@ -258,6 +284,139 @@ impl APU {
     }
 }
 
+const DMC_PERIOD: [usize; 16] = [
+    428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54
+];
+
+struct Dmc {
+    enabled: bool,
+
+    output: usize,
+
+    irq: bool,
+    irq_enabled: bool,
+
+    loop_sample: bool,
+
+    period: usize,
+    period_counter: usize,
+
+    sample_start_addr: usize,
+    sample_addr: usize,
+
+    sample_len: usize,
+    sample_buffer: u8,
+    sample_has_data: bool,
+    shift_reg: u8,
+    dpcm_active: bool,
+
+    bytes_remaining: usize,
+    bits_remaining: usize,
+}
+
+impl Dmc {
+    fn new() -> Dmc {
+        Dmc {
+            enabled: false,
+
+            output: 0,
+
+            irq: false,
+            irq_enabled: false,
+
+            loop_sample: false,
+
+            period: DMC_PERIOD[0],
+            period_counter: 1,
+
+            sample_start_addr: 0x8000,
+            sample_addr: 0x8000,
+
+            sample_len: 1,
+            sample_buffer: 0,
+            sample_has_data: false,
+            shift_reg: 0xFF,
+            dpcm_active: false,
+
+            bytes_remaining: 0,
+            bits_remaining: 8,
+        }
+    }
+
+    pub fn write_4010 (&mut self, value: u8) {
+        // println!("DMC setup {:#X}", value);
+        self.irq_enabled = (value & (1 << 7)) != 0;
+        if !self.irq_enabled {self.irq = false};
+        self.loop_sample = (value & (1 << 6)) != 0;
+        self.period = DMC_PERIOD[(value & 0xF) as usize];
+    }
+
+    pub fn write_4011 (&mut self, value: u8) {
+        //println!("DMC direct load {:#X}", value);
+        self.output = (value & 0x7F) as usize;
+    }
+
+    pub fn write_4012 (&mut self, value: u8) {
+        self.sample_start_addr = 0xC000 + (value as usize * 64);
+        // println!("DMC start {:#X}", self.sample_start_addr);
+    }
+
+    pub fn write_4013 (&mut self, value: u8) {
+        self.sample_len = (value as usize * 16) + 1;
+        // println!("DMC len {:#X}", self.sample_len);
+    }
+
+    // needs cart
+    fn load_dmc_sample (&mut self, cart: &Cart) {
+        // println!("Try to load dmc sample");
+        self.sample_buffer = cart.read_cart_u8(self.sample_addr as u16);
+        // println!("DMC sample {:#X}", self.sample_buffer);
+        self.sample_has_data = true;
+
+        self.bytes_remaining -= 1;
+        self.sample_addr = 0x8000 + ((self.sample_addr + 1) % 0x8000);
+        if self.bytes_remaining == 0 {
+            if self.loop_sample {
+                self.sample_addr = self.sample_start_addr;
+                self.bytes_remaining = self.sample_len;
+            } else {
+                if self.irq_enabled {
+                    self.irq = true;
+                }
+            }
+        }
+    }
+
+    pub fn play_dmc (&mut self, cart: &Cart) {
+        if self.dpcm_active {
+            if self.shift_reg & 1 == 1 {
+                if self.output < 126 {
+                    self.output += 2;
+                }
+            } else {
+                if self.output > 1 {
+                    self.output -= 2;
+                }
+            }
+            self.shift_reg >>= 1;
+        }
+//println!("playing DMC");
+        self.bits_remaining -= 1;
+        if self.bits_remaining == 0 {
+            self.bits_remaining = 8;
+
+            self.dpcm_active = self.sample_has_data;
+            if self.dpcm_active {
+                self.shift_reg = self.sample_buffer;
+                self.sample_has_data = false;
+            }
+
+            if self.bytes_remaining > 0 {
+                self.load_dmc_sample(cart)
+            }
+        }
+    }
+}
 
 
 const PULSE_DUTY: [[u8; 8]; 4] = [
@@ -617,7 +776,7 @@ impl Noise {
 
     pub fn write_400f (&mut self, value: u8) {
         if self.enabled {
-            self.length = value >> 3;
+            self.length = LEN_TABLE[(value >> 3) as usize];
             self.output_noise();
         }
         self.envelope_start = true;

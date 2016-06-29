@@ -835,9 +835,11 @@ impl CPU {
             PPUADDR => self.bus.ppu.write_ppuaddr(value),
             PPUDATA => self.bus.ppu.write_ppudata(value),
 
-            APU_REGISTERS_START...APU_REGISTERS_END | SND_CHN | FRAME_TIMER => {
+            APU_REGISTERS_START...APU_REGISTERS_END | FRAME_TIMER => {
                 self.bus.apu.write(addr, value);
             }
+
+            SND_CHN => self.bus.apu.write_status_reg(value, &self.bus.cart),
 
             OAMDMA => {
                 // println!("OAMDMA at {:#X}", value);
@@ -855,7 +857,7 @@ impl CPU {
                 self.bus.ppu.scanline += 5;
 
                 // unlike the ppu the apu actually needs to tick instead of faking it.
-                self.bus.apu.tick(513);
+                self.bus.apu.tick(513, &self.bus.cart);
 
 
             }

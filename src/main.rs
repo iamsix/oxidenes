@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 // use std::sync::mpsc::channel;
 // use std::sync::mpsc::Receiver;
 // use time;
+use std::rc::Rc;
 
 use std::env;
 use std::fmt;
@@ -108,6 +109,8 @@ fn main() {
     // println!("PC is {:#X}", pc);
     let mut cpu = cpu::CPU::new(cpubus, pc as u16);
     // println!("{:#?}", cpu);
+    // let f = Rc::new(&cpu);
+    // cpu.bus.apu.setup_read_u8(f);
 
     let device = audio_subsystem.open_playback(None, &desired_spec, |spec| {
         // Show obtained AudioSpec
@@ -182,14 +185,13 @@ fn main() {
         cpu.execute_op(&op, &instr);
 
         // TODO: IRQ from apu
-        cpu.bus.apu.tick(instr.ticks as isize);
-        // if cpu.bus.apu.buff_ctr == 2047 device.resume();
+        cpu.bus.apu.tick(instr.ticks as isize, &cpu.bus.cart);
 
         if nmi {
             //    println!("NMI");
             cpu.nmi();
             cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
-            cpu.bus.apu.tick(7);
+            cpu.bus.apu.tick(7, &cpu.bus.cart);
         }
     }
 }
