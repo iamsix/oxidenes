@@ -257,9 +257,9 @@ impl PPU {
         match v_addr {
             0x0000...0x1FFF => self.chr.write_u8(v_addr, data),
             0x2000...0x2FFF => {
-                // if v_addr > 0x3000 {
-                //    v_addr -= 0x1000;
-                // }
+                // TODO: change nametable mirroring to use the same 2 nametables
+                // for h/v switching (zelda/metroid/etc)
+
                 let mut offset:u16 = 0;
                 if self.chr.vertical_mirroring && v_addr >= 0x2800 {
                     offset = 0x800;
@@ -299,9 +299,7 @@ impl PPU {
         match addr {
             0x0000...0x1FFF => self.chr.read_u8(addr),
             0x2000...0x2FFF => {
-                //if addr > 0x3000 {
-                //    addr -= 0x1000;
-                //  }
+
                 let mut offset:u16 = 0;
                 if self.chr.vertical_mirroring && addr >= 0x2800 {
                     offset = 0x800;
@@ -407,6 +405,7 @@ impl PPU {
 
                 if self.cycles > 2 && self.sprite0_to_be_hit {
                     self.sprite0_hit = true;
+                    // println!("Sprite0 hit frame {}", self.framecount);
                     self.sprite0_to_be_hit = false;
                 }
 
@@ -520,11 +519,23 @@ impl PPU {
             sprite = 63 - sprite;
 
             let y = self.oam[sprite * 4] as i16 + 1;
+            let vert = if self.sprite_8x16 {
+                15
+            } else {
+                7
+            };
             // println!("sprite {:} is at {:}", sprite, y);
-            if sl >= y && sl <= y + 7 {
+            if sl >= y && sl <= y + vert {
                 let mut index = self.oam[(sprite * 4) + 1] as u16 * 16;
-                if self.sprite_table_high {
+                if self.sprite_table_high && !self.sprite_8x16 {
                     index += 0x1000;
+                }
+                if self.sprite_8x16 {
+                    let mut idx = self.oam[(sprite * 4) + 1];
+                    if idx & 1 == 1 {
+                        idx &= 0xFE;
+                        index = (idx as u16 * 16) + 0x1000;
+                    }
                 }
                 let pal = 0x11 + (self.oam[(sprite * 4) + 2] & 0b11) * 4;
 
@@ -536,15 +547,20 @@ impl PPU {
                 // println!("Sprite {:} is {:?} on {:},{:}", sprite, bg, y, x);
 
                 let offset = if flip_v {
-                    7 - (sl - y)
+                    vert - (sl - y)
                 } else {
                     sl - y
                 };
                 //println!("offset {}", offset);
-
-                let sprite_data1 = self.read_data(index + offset as u16);
-                let sprite_data2 = self.read_data(index + 8 + offset as u16);
-
+                let sprite_data1: u8;
+                let sprite_data2: u8;
+                if offset <= 7 {
+                    sprite_data1 = self.read_data(index + offset as u16);
+                    sprite_data2 = self.read_data(index + 8 + offset as u16);
+                } else {
+                    sprite_data1 = self.read_data(index + 8 + offset as u16);;
+                    sprite_data2 = self.read_data(index + 16 + offset as u16);;
+                }
                 let bgcolor = self.palette[0] as usize % 64;
                 for px in 0..8 {
                     let pv:u8;

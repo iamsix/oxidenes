@@ -20,6 +20,7 @@ impl Joy {
     }
 
     pub fn set_keys(&mut self, keys: Vec<Keycode>) {
+        self.joy1 = 0;
         for key in keys {
             match key {
                 Keycode::LCtrl => {
@@ -55,6 +56,7 @@ impl Joy {
     pub fn strobe_joy(&mut self, value: u8) {
         if value == 0 {
             self.joy1_read = 0;
+            // self.joy1 = 0;
             self.joy2_read = 0;
         } else {
             // self.joy1 = 1;
@@ -64,8 +66,8 @@ impl Joy {
     pub fn read_joy1(&mut self) -> u8 {
         let ret = (self.joy1 & (1 << self.joy1_read)) >> self.joy1_read;
         // println!("joy1 {:#b} ret {} at {}", self.joy1, ret, self.joy1_read);
-        self.joy1 &= !(1 << self.joy1_read);
-        self.joy1_read += 1;
+        // self.joy1 &= !(1 << self.joy1_read);
+        self.joy1_read = (self.joy1_read + 1) % 8;
         // if self.joy1_read > 8
         ret
     }

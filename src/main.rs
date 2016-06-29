@@ -194,7 +194,7 @@ fn main() {
             irq = cpu.bus.apu.tick(7, &cpu.bus.cart);
         }
         if irq {
-            // cpu.irq();
+            cpu.irq();
         }
     }
 }

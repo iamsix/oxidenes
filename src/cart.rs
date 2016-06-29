@@ -258,7 +258,7 @@ impl Cart {
                     _ => panic!("Mapper {} is unimplemented", self.mapper),
                 }
             }
-            _ => {println!("tried to write to {:#X}", addr)}
+            _ => {println!("tried to write to {:#X} PRG", addr)}
 
         }
 
@@ -286,9 +286,13 @@ impl Cart {
             match addr {
                 // control
                 0x8000...0x9FFF => {
+                    // println!("before: h {} v {}", self.horizontal_mirroring, self.vertical_mirroring);
                     self.generic_registers[1] = self.generic_registers[0];
                     self.vertical_mirroring = self.generic_registers[1] & 3 == 2;
+                    chr.vertical_mirroring = self.vertical_mirroring;
                     self.horizontal_mirroring = self.generic_registers[1] & 3 == 3;
+                    chr.horizontal_mirroring = self.horizontal_mirroring;
+                    // println!("afer: h {} v {}", self.horizontal_mirroring, self.vertical_mirroring);
                     if (self.generic_registers[1] & 3) < 2 {
                         panic!("single screen mirroring");
                     }
@@ -361,9 +365,18 @@ impl Cart {
 
     // should only be used by pc so sram isn't entirely needed
     pub fn read_cart_u16(&self, addr: u16) -> u16 {
-        let read_pos = self.map_rom(addr as usize);
-        let value = ((self.rom[read_pos + 1] as u16) << 8 | (self.rom[read_pos] as u16)) as u16;
-        value
+        match addr {
+            SRAM_START...SRAM_END => {
+                // TODO: some mappers have more than 8kb
+                let real_addr = (addr - SRAM_START) as usize;
+                (self.prg_ram[real_addr + 1] as u16) << 8 | self.prg_ram[real_addr] as u16
+            }
+            PRG_ROM_START...PRG_ROM_END => {
+                let read_pos = self.map_rom(addr as usize);
+                ((self.rom[read_pos + 1] as u16) << 8 | (self.rom[read_pos] as u16)) as u16
+            }
+            _ => panic!("not in prg rom space u16")
+        }
     }
 
     fn map_rom(&self, addr: usize) -> usize {
@@ -379,7 +392,7 @@ impl Cart {
                 }
                 actual
             }
-            _ => {println!("not in rom space {:#X}", addr);
+            _ => {println!("not in PRG rom space {:#X}", addr);
                 0
             }
         }
