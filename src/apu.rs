@@ -66,8 +66,8 @@ impl APU {
             dmc: dmc,
 
             frame_clock: 0,
-            interrupt_disable: false,
-            interrupt: true,
+            interrupt_disable: true,
+            interrupt: false,
             four_step: true,
             even_clock: false,
 
@@ -81,7 +81,7 @@ impl APU {
         }
     }
 
-    pub fn tick(&mut self, ticks: isize, cart: &Cart) {
+    pub fn tick(&mut self, ticks: isize, cart: &Cart) -> bool {
 
         for _ in 0..ticks {
             self.frame_clock = (self.frame_clock + 1) % 29830;
@@ -138,6 +138,8 @@ impl APU {
 
         }
         // TODO: return interrupts as necessary
+        return self.interrupt || self.dmc.irq;
+        // false
     }
 
     fn quarter_frame (&mut self) {
@@ -181,6 +183,8 @@ impl APU {
                 }
                 _ => {}
             }
+        } else {
+            // println!("5 step")
         }
     }
 

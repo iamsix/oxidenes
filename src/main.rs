@@ -185,13 +185,16 @@ fn main() {
         cpu.execute_op(&op, &instr);
 
         // TODO: IRQ from apu
-        cpu.bus.apu.tick(instr.ticks as isize, &cpu.bus.cart);
+        let mut irq = cpu.bus.apu.tick(instr.ticks as isize, &cpu.bus.cart);
 
         if nmi {
             //    println!("NMI");
             cpu.nmi();
             cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
-            cpu.bus.apu.tick(7, &cpu.bus.cart);
+            irq = cpu.bus.apu.tick(7, &cpu.bus.cart);
+        }
+        if irq {
+            // cpu.irq();
         }
     }
 }

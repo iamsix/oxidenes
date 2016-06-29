@@ -18,7 +18,7 @@ pub struct ChrRom {
     mapper: u8,
 
 // offset addresses, defined during the write stage
-/*
+
     chr_bank_0000: usize,
     chr_bank_0400: usize,
     chr_bank_0800: usize,
@@ -27,7 +27,7 @@ pub struct ChrRom {
     chr_bank_1400: usize,
     chr_bank_1800: usize,
     chr_bank_1C00: usize,
-    */
+
     bank: u8,
 }
 
@@ -49,6 +49,17 @@ impl ChrRom {
             mapper: (romfile[6] & 0b11110000) >> 4 | romfile[7] & 0b11110000,
 
             rom: vec![0; 0x2000].into_boxed_slice(),
+
+
+            chr_bank_0000: 0,
+            chr_bank_0400: 0x400,
+            chr_bank_0800: 0x800,
+            chr_bank_0C00: 0xC00,
+            chr_bank_1000: 0x1000,
+            chr_bank_1400: 0x1400,
+            chr_bank_1800: 0x1800,
+            chr_bank_1C00: 0x1C00,
+
             bank: 0,
         };
 
@@ -64,16 +75,77 @@ impl ChrRom {
 
     pub fn read_u8(&self, addr: u16) -> u8 {
         // TODO: MAPPERS!
-        self.rom[addr as usize + (self.bank as usize * 0x2000)]
+        self.rom[self.map_chr_rom(addr)]
     }
 
     pub fn write_u8(&mut self, addr:u16, data: u8) {
-
-        self.rom[addr as usize + (self.bank as usize * 0x2000)] = data;
+        // this will probably fail badly due to chr ram vs rom...
+        self.rom[self.map_chr_rom(addr)] = data;
     }
 
+    fn map_chr_rom(&self, addr: u16) -> usize {
+        match addr {
+            0x0000...0x03FF => self.chr_bank_0000 + addr as usize,
+            0x0400...0x07FF => self.chr_bank_0400 + (addr as usize - 0x0400),
+            0x0800...0x0BFF => self.chr_bank_0800 + (addr as usize - 0x0800),
+            0x0C00...0x0FFF => self.chr_bank_0C00 + (addr as usize - 0x0C00),
+            0x1000...0x13FF => self.chr_bank_1000 + (addr as usize - 0x1000),
+            0x1400...0x17FF => self.chr_bank_1400 + (addr as usize - 0x1400),
+            0x1800...0x1BFF => self.chr_bank_1800 + (addr as usize - 0x1800),
+            0x1C00...0x1FFF => self.chr_bank_1C00 + (addr as usize - 0x1C00),
+            _ => panic!("Address not in CHR rom space"),
+        }
+    }
+
+    pub fn switch_8kb_bank (&mut self, bank: u8) {
+        self.chr_bank_0000 = (bank as usize * 0x2000) + 0x0000;
+        self.chr_bank_0400 = (bank as usize * 0x2000) + 0x0400;
+        self.chr_bank_0800 = (bank as usize * 0x2000) + 0x0800;
+        self.chr_bank_0C00 = (bank as usize * 0x2000) + 0x0C00;
+        self.chr_bank_1000 = (bank as usize * 0x2000) + 0x1000;
+        self.chr_bank_1400 = (bank as usize * 0x2000) + 0x1400;
+        self.chr_bank_1800 = (bank as usize * 0x2000) + 0x1800;
+        self.chr_bank_1C00 = (bank as usize * 0x2000) + 0x1C00;
+    }
+
+    pub fn switch_4kb_bank (&mut self, bank: u8, lower_window: bool) {
+        if lower_window {
+            self.chr_bank_0000 = (bank as usize * 0x1000) + 0x0000;
+            self.chr_bank_0400 = (bank as usize * 0x1000) + 0x0400;
+            self.chr_bank_0800 = (bank as usize * 0x1000) + 0x0800;
+            self.chr_bank_0C00 = (bank as usize * 0x1000) + 0x0C00;
+        } else {
+            self.chr_bank_1000 = (bank as usize * 0x1000) + 0x0000;
+            self.chr_bank_1400 = (bank as usize * 0x1000) + 0x0400;
+            self.chr_bank_1800 = (bank as usize * 0x1000) + 0x0800;
+            self.chr_bank_1C00 = (bank as usize * 0x1000) + 0x0C00;
+        }
+    }
+
+    pub fn switch_2kb_bank (&mut self, bank: u8, window: u8) {
+        match window {
+            0 => {
+                self.chr_bank_0000 = (bank as usize * 0x800);
+                self.chr_bank_0400 = (bank as usize * 0x800) + 0x400;
+            }
+            1 => {
+                self.chr_bank_0800 = (bank as usize * 0x800);
+                self.chr_bank_0C00 = (bank as usize * 0x800) + 0x400;
+            }
+            2 => {
+                self.chr_bank_1000 = (bank as usize * 0x800);
+                self.chr_bank_1400 = (bank as usize * 0x800) + 0x400;
+            }
+            3 => {
+                self.chr_bank_1800 = (bank as usize * 0x800);
+                self.chr_bank_1C00 = (bank as usize * 0x800) + 0x400;
+            }
+            _ => panic!("There aren't that many 2kb windows in chr"),
+        }
+    }
 }
 
+// not sure how I'm going to do more complex mppers here...
 
 pub struct Cart {
     rom: Box<[u8]>,
@@ -90,12 +162,15 @@ pub struct Cart {
     //   trainer: bool,
     pub mapper: u8,
 
-    pub low_prg_bank: u8,
-
     prg_bank_8000: usize,
     prg_bank_A000: usize,
     prg_bank_C000: usize,
     prg_bank_E000: usize,
+
+    // used by mappers - not as nice as names but works as long as I keep them straight
+    // I'll have to see if there's a better way to do this
+    generic_registers: [u8; 10],
+    last_write_addr: u16,
 
 }
 
@@ -120,6 +195,12 @@ impl Cart {
                     prg_bank_E000 = 0x6000;
                 }
             }
+            1 => {
+                prg_bank_8000 = 0x0000;
+                prg_bank_A000 = 0x2000;
+                prg_bank_C000 = (1024 * 16) * (rom_banks as usize - 1);
+                prg_bank_E000 = ((1024 * 16) * (rom_banks as usize - 1)) + 0x2000;
+            }
             2 => {
                 prg_bank_8000 = 0x0000;
                 prg_bank_A000 = 0x2000;
@@ -141,7 +222,6 @@ impl Cart {
             //           prg_ram_present: false,
             //           trainer: false,
             mapper: mapper,
-            low_prg_bank: 0,
             prg_ram: vec![0; 0x2000].into_boxed_slice(),
             rom: romfile,
 
@@ -150,10 +230,13 @@ impl Cart {
             prg_bank_C000: prg_bank_C000,
             prg_bank_E000: prg_bank_E000,
 
+            generic_registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            last_write_addr: 0x0,
         }
     }
 
     pub fn write_cart_u8(&mut self, addr: u16, value: u8, chr: &mut ChrRom) {
+        self.last_write_addr = addr;
 
         match addr {
             SRAM_START...SRAM_END => {
@@ -164,13 +247,14 @@ impl Cart {
             PRG_ROM_START...PRG_ROM_END => {
                 match self.mapper {
                     0 => {}
-                    1 => panic!("MMC1 unimplemented"),
+                    1 => self.mmc1_write(addr, value, chr),
                     2 => {
                         let bank = (value & 0xF) as usize;
+                        // println!("mapper 2 Select bank {} on lower", bank);
                         self.prg_bank_8000 = bank * (1024 * 16);
                         self.prg_bank_A000 = (bank * (1024 * 16)) + 0x2000;
                     },
-                    3 => chr.bank = value & 0xF,
+                    3 => chr.switch_8kb_bank(value & 0xF),
                     _ => panic!("Mapper {} is unimplemented", self.mapper),
                 }
             }
@@ -180,17 +264,105 @@ impl Cart {
 
     }
 
-    pub fn read_cart_u8(&self, addr: u16) -> u8 {
-        //let read_pos = self.map_rom(addr as usize);
-        let value = self.rom[self.map_rom(addr as usize)];
-//        println!("Read byte: {:#x} from {:#x}", value, read_pos);
-        value
+    // fn set_16kb_prg_bank (&mut self, bank: u8, upper_bank: bool) {}
+    // fn set_32kb_prg_bank (&mut self, bank: u8) {}
+
+    fn mmc1_write (&mut self, addr: u16, value: u8, chr: &mut ChrRom) {
+        // println!("wrote {:>8b} on {:#X}", value, addr);
+        // 0 = load register
+        // 1 = control register
+        // 8 = load reg write counter
+        if value & 0x80 != 0 {
+            self.generic_registers[0] = 0;
+            self.generic_registers[1] |= 0x0C;
+            self.generic_registers[8] = 0;
+        } else {
+            self.generic_registers[0] >>= 1;
+            self.generic_registers[0] |= (value & 1) << 4;
+            self.generic_registers[8] += 1;
+        }
+        if self.generic_registers[8] == 5 {
+            // println!("control load {:#X} on {:#X}", self.generic_registers[0], self.last_write_addr);
+            match addr {
+                // control
+                0x8000...0x9FFF => {
+                    self.generic_registers[1] = self.generic_registers[0];
+                    self.vertical_mirroring = self.generic_registers[1] & 3 == 2;
+                    self.horizontal_mirroring = self.generic_registers[1] & 3 == 3;
+                    if (self.generic_registers[1] & 3) < 2 {
+                        panic!("single screen mirroring");
+                    }
+                }
+
+                // chr bank 0 or 8kb bank
+                0xA000...0xBFFF => {
+                    if self.generic_registers[1] & 0x10 != 0 {
+                        let bank = self.generic_registers[0];
+                        chr.switch_4kb_bank(bank, true);
+                    } else {
+                        let bank = self.generic_registers[0] >> 1;
+                        chr.switch_8kb_bank(bank);
+                    }
+                }
+
+                // chr bank 1
+                0xC000...0xDFFF => {
+                    if self.generic_registers[1] & 0x10 != 0 {
+                        let bank = self.generic_registers[0];
+                        chr.switch_4kb_bank(bank, false);
+                    }
+                }
+
+                // prg bank
+                0xE000...0xFFFF => {
+                    let switchmode = (self.generic_registers[1] >> 2) & 3;
+                    if switchmode == 0 || switchmode == 1 {
+                        // 32kb switch mode
+                        let bank = ((self.generic_registers[0] & 0xF) >> 1) as usize;
+                        self.prg_bank_8000 = bank * (1024 * 32);
+                        self.prg_bank_A000 = bank * (1024 * 32) + 0x2000;
+                        self.prg_bank_C000 = bank * (1024 * 32) + 0x4000;
+                        self.prg_bank_E000 = bank * (1024 * 32) + 0x6000;
+                    }
+                    if switchmode == 2 {
+                        let bank = (self.generic_registers[0] & 0xF) as usize;
+                        self.prg_bank_8000 = 0;
+                        self.prg_bank_A000 = 0x2000;
+                        self.prg_bank_C000 = (1024 * 16) * bank;
+                        self.prg_bank_E000 = ((1024 * 16) * bank) + 0x2000;
+                    }
+                    if switchmode == 3 {
+                        let bank = (self.generic_registers[0] & 0xF) as usize;
+                        self.prg_bank_8000 = (1024 * 16) * bank;
+                        self.prg_bank_A000 = ((1024 * 16) * bank) + 0x2000;
+                        self.prg_bank_C000 = (1024 * 16) * (self.prg_rom_banks as usize - 1);
+                        self.prg_bank_E000 = ((1024 * 16) * (self.prg_rom_banks as usize - 1)) + 0x2000;
+                    }
+                }
+
+                _ => panic!("unreachable mmc1"),
+            }
+            self.generic_registers[0] = 0;
+            self.generic_registers[8] = 0;
+        }
     }
 
+    pub fn read_cart_u8(&self, addr: u16) -> u8 {
+        match addr {
+            SRAM_START...SRAM_END => {
+                // TODO: some mappers have more than 8kb
+                let real_addr = (addr - SRAM_START) as usize;
+                self.prg_ram[real_addr]
+            }
+            PRG_ROM_START...PRG_ROM_END => self.rom[self.map_rom(addr as usize)],
+            _ => {0}
+        }
+    }
+
+    // should only be used by pc so sram isn't entirely needed
     pub fn read_cart_u16(&self, addr: u16) -> u16 {
         let read_pos = self.map_rom(addr as usize);
         let value = ((self.rom[read_pos + 1] as u16) << 8 | (self.rom[read_pos] as u16)) as u16;
-//        println!("Read u16: {:#x} from {:#x}", value, read_pos);
         value
     }
 
@@ -200,7 +372,13 @@ impl Cart {
             0x8000...0x9FFF => {(addr - 0x8000) + self.prg_bank_8000 + INES_OFFSET}
             0xA000...0xBFFF => {(addr - 0xA000) + self.prg_bank_A000 + INES_OFFSET}
             0xC000...0xDFFF => {(addr - 0xC000) + self.prg_bank_C000 + INES_OFFSET}
-            0xE000...0xFFFF => {(addr - 0xE000) + self.prg_bank_E000 + INES_OFFSET}
+            0xE000...0xFFFF => {
+                let actual = (addr - 0xE000) + self.prg_bank_E000 + INES_OFFSET;
+                if addr == RESET_VECTOR_LOC as usize {
+                    println!("Actual reset vector is at {:#X}", actual)
+                }
+                actual
+            }
             _ => {println!("not in rom space {:#X}", addr);
                 0
             }

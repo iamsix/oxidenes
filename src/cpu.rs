@@ -189,7 +189,7 @@ impl CPU {
         (op, instr)
     }
 
-    pub fn nmi (&mut self){
+    pub fn nmi (&mut self) {
         let hi = (self.program_counter >> 8) as u8;
         self.push_stack(hi);
         let lo = (0x00ff & self.program_counter) as u8;
@@ -201,6 +201,23 @@ impl CPU {
         self.program_counter = tmp;
         // need to add some cycles here..
         self.cycle += 7  * PPU_MULTIPLIER;
+    }
+
+    pub fn irq (&mut self) {
+        if !self.status_reg.interrupt_disable {
+            println!("APU IRQ");
+            let hi = (self.program_counter >> 8) as u8;
+            self.push_stack(hi);
+            let lo = (0x00ff & self.program_counter) as u8;
+            self.push_stack(lo);
+            let sr: u8 = self.status_reg.into();
+            self.push_stack(sr);
+     //       println!("NMI");
+            let tmp = self.cpu_read_u16(IRQ_BRK_VECTOR_LOC);
+            self.program_counter = tmp;
+            // need to add some cycles here..
+            self.cycle += 7  * PPU_MULTIPLIER;
+        }
     }
 
 
@@ -738,7 +755,7 @@ impl CPU {
         let addr = 0x100 + self.stack_pointer as u16;
         self.cpu_write_u8(addr, value);
         // println!("stack wrote at 0x01{:x}: {:x}", self.stack_pointer, value);
-        self.stack_pointer -= 1;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
 
     fn pull_stack(&mut self) -> u8 {
@@ -771,7 +788,8 @@ impl CPU {
             PPUCTRL => self.bus.ppu.lastwrite,
             PPUMASK => self.bus.ppu.lastwrite,
             OAMADDR => self.bus.ppu.lastwrite,
-
+            PPUSCROLL => self.bus.ppu.lastwrite,
+            PPUADDR => self.bus.ppu.lastwrite,
             PPUSTATUS => self.bus.ppu.read_ppustatus(),
             PPUDATA => self.bus.ppu.read_ppudata(),
             OAMDATA => self.bus.ppu.read_oamdata(),
