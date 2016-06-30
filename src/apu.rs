@@ -26,9 +26,6 @@ pub struct APU {
 
     pub output: Arc<Mutex<Vec<f32>>>,
 //    output2: Sender<f32>,
-    buff_ctr: usize,
-    out_ctr: usize,
-
 }
 
 const STEP1: usize = 7457;
@@ -76,8 +73,6 @@ impl APU {
 
             output: Arc::new(Mutex::new(Vec::new())),
             // output2: tx,
-            buff_ctr: 0,
-            out_ctr: 0,
         }
     }
 

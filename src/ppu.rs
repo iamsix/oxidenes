@@ -66,7 +66,7 @@ pub struct PPU {
     initial_reset: bool,
     nmi_generated: bool,
 
-    sprite0_bg_prerender: [u8; 256],
+    bg_prerender: [u8; 256],
 
     pub screen: [[u32; 256]; 240],
 
@@ -131,7 +131,7 @@ impl PPU {
             nmi_generated: false,
 
             screen: [[0; 256]; 240],
-            sprite0_bg_prerender: [0; 256],
+            bg_prerender: [0; 256],
 
             framecount: 0,
             extra_cycle: false,
@@ -257,23 +257,48 @@ impl PPU {
         match v_addr {
             0x0000...0x1FFF => self.chr.write_u8(v_addr, data),
             0x2000...0x2FFF => {
-                // TODO: change nametable mirroring to use the same 2 nametables
-                // for h/v switching (zelda/metroid/etc)
 
-                let mut offset:u16 = 0;
-                if self.chr.vertical_mirroring && v_addr >= 0x2800 {
-                    offset = 0x800;
-                } else if self.chr.horizontal_mirroring &&
-                    (v_addr >= 0x2400 && v_addr < 0x2800) ||
-                    (v_addr >= 0x2C00 && v_addr < 0x3000)
-                {
-                    offset = 0x400;
-                }
+                let realaddr = match self.vram_addr & 0x2C00 {
+                    0x2000 => {
+                        (v_addr - 0x2000) as usize
+                    }
+                    0x2400 => {
+                        if self.chr.vertical_mirroring {
+                            (v_addr - 0x2000) as usize
+                        } else if self.chr.horizontal_mirroring {
+                            (v_addr - 0x2000) as usize - 0x400
+                        } else if self.chr.four_screen_vram {
+                            (v_addr - 0x2000) as usize
+                        } else {
+                            panic!("Unknown mirroring mode 0x2400 write (single screen?)")
+                        }
+                    }
+                    0x2800 => {
+                        if self.chr.vertical_mirroring {
+                            (v_addr - 0x2000) as usize - 0x800
+                        } else if self.chr.horizontal_mirroring {
+                            (v_addr - 0x2000) as usize - 0x400
+                        } else if self.chr.four_screen_vram {
+                            (v_addr - 0x2000) as usize
+                        } else {
+                            panic!("Unknown mirroring mode 0x2800 write (single screen?)")
+                        }
+                    }
+                    0x2C00 => {
+                        if self.chr.vertical_mirroring {
+                            (v_addr - 0x2000) as usize - 0x800
+                        } else if self.chr.horizontal_mirroring {
+                            (v_addr - 0x2000) as usize - 0x800
+                        } else if self.chr.four_screen_vram {
+                            (v_addr - 0x2000) as usize
+                        } else {
+                            panic!("Unknown mirroring mode 0x2c00 write (single screen?)")
+                        }
+                    }
+                    _ => panic!("Invalid vram address (write)")
+                };
 
-                let realaddr = (v_addr - 0x2000) - offset;
-                self.vram[realaddr as usize] = data;
-                // if realaddr =
-         //       println!("Writing PPURAM {:#X} at {:#X} = {:#X}", data, v_addr, realaddr);
+                self.vram[realaddr] = data;
             }
             0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
             0x3F00...0x3FFF => {
@@ -296,22 +321,51 @@ impl PPU {
 
     fn read_data(&self, addr: u16) -> u8 {
 //        println!("read from {:#X}", addr);
+
         match addr {
             0x0000...0x1FFF => self.chr.read_u8(addr),
             0x2000...0x2FFF => {
+                let realaddr = match addr & 0x2C00 {
+                    0x2000 => {
+                        (addr - 0x2000) as usize
+                    }
+                    0x2400 => {
+                        if self.chr.vertical_mirroring {
+                            (addr - 0x2000) as usize
+                        } else if self.chr.horizontal_mirroring {
+                            (addr - 0x2000) as usize - 0x400
+                        } else if self.chr.four_screen_vram {
+                            (addr - 0x2000) as usize
+                        } else {
+                            panic!("Unknown mirroring mode 0x2400 read (single screen?)")
+                        }
+                    }
+                    0x2800 => {
+                        if self.chr.vertical_mirroring {
+                            (addr - 0x2000) as usize - 0x800
+                        } else if self.chr.horizontal_mirroring {
+                            (addr - 0x2000) as usize - 0x400
+                        } else if self.chr.four_screen_vram {
+                            (addr - 0x2000) as usize
+                        } else {
+                            panic!("Unknown mirroring mode 0x2800 read (single screen?)")
+                        }
+                    }
+                    0x2C00 => {
+                        if self.chr.vertical_mirroring {
+                            (addr - 0x2000) as usize - 0x800
+                        } else if self.chr.horizontal_mirroring {
+                            (addr - 0x2000) as usize - 0x800
+                        } else if self.chr.four_screen_vram {
+                            (addr - 0x2000) as usize
+                        } else {
+                            panic!("Unknown mirroring mode 0x2c000 read (single screen?)")
+                        }
+                    }
+                    _ => panic!("Invalid vram address (read)")
+                };
 
-                let mut offset:u16 = 0;
-                if self.chr.vertical_mirroring && addr >= 0x2800 {
-                    offset = 0x800;
-                } else if self.chr.horizontal_mirroring &&
-                    (addr >= 0x2400 && addr < 0x2800) ||
-                    (addr >= 0x2C00 && addr < 0x3000)
-                {
-                    offset = 0x400;
-                }
-
-                let realaddr = (addr - 0x2000) - offset;
-                self.vram[realaddr as usize]
+                self.vram[realaddr]
             }
             0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
             0x3F00...0x3FFF => {
@@ -390,7 +444,7 @@ impl PPU {
                     let bgcolor = PALETTE[self.palette[0] as usize % 64];
                     self.screen[self.scanline as usize] = [bgcolor; 256];
                     if !self.sprite0_hit && self.show_bg && self.show_sprites {
-                        self.sprite0_bg_prerender = [0; 256];
+                        self.bg_prerender = [0; 256];
                     }
                 }
 
@@ -499,10 +553,7 @@ impl PPU {
                 if pv > 0 {
                     let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize % 64];
                     self.screen[sl as usize][pixel_x as usize] = pixel;
-
-                    if sl >= self.oam[0] as i16 + 1 && sl <= self.oam[0] as i16 + 8 {
-                        self.sprite0_bg_prerender[pixel_x as usize] = pv;
-                    }
+                    self.bg_prerender[pixel_x as usize] = pv;
                 }
             }
         }
@@ -574,6 +625,7 @@ impl PPU {
                         // TODO: This is actually wrong and shouldn't render on a 0 background value
                         // regardless of colour (palette colour could be the same as bgcolor)
                         // I would need the pre-render bg line to determine that
+                        // and I would need to render sprites only in the 8-pixel bg window
                         let bgpixel = self.screen[sl as usize][x as usize + px as usize];
                         let pixel = if background && bgpixel != PALETTE[bgcolor] {
                             bgpixel
@@ -583,7 +635,7 @@ impl PPU {
                         };
                         self.screen[sl as usize][x as usize + px as usize] = pixel;
                         if sprite == 0 && !self.sprite0_hit && (x as usize + px as usize) < 255 &&
-                             self.sprite0_bg_prerender[x as usize + px as usize] != 0
+                             self.bg_prerender[x as usize + px as usize] != 0
                         {
                                 self.sprite0_to_be_hit = true;
 

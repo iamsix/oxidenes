@@ -125,19 +125,19 @@ impl ChrRom {
     pub fn switch_2kb_bank (&mut self, bank: u8, window: u8) {
         match window {
             0 => {
-                self.chr_bank_0000 = (bank as usize * 0x800);
+                self.chr_bank_0000 = bank as usize * 0x800;
                 self.chr_bank_0400 = (bank as usize * 0x800) + 0x400;
             }
             1 => {
-                self.chr_bank_0800 = (bank as usize * 0x800);
+                self.chr_bank_0800 = bank as usize * 0x800;
                 self.chr_bank_0C00 = (bank as usize * 0x800) + 0x400;
             }
             2 => {
-                self.chr_bank_1000 = (bank as usize * 0x800);
+                self.chr_bank_1000 = bank as usize * 0x800;
                 self.chr_bank_1400 = (bank as usize * 0x800) + 0x400;
             }
             3 => {
-                self.chr_bank_1800 = (bank as usize * 0x800);
+                self.chr_bank_1800 = bank as usize * 0x800;
                 self.chr_bank_1C00 = (bank as usize * 0x800) + 0x400;
             }
             _ => panic!("There aren't that many 2kb windows in chr"),
@@ -195,13 +195,7 @@ impl Cart {
                     prg_bank_E000 = 0x6000;
                 }
             }
-            1 => {
-                prg_bank_8000 = 0x0000;
-                prg_bank_A000 = 0x2000;
-                prg_bank_C000 = (1024 * 16) * (rom_banks as usize - 1);
-                prg_bank_E000 = ((1024 * 16) * (rom_banks as usize - 1)) + 0x2000;
-            }
-            2 => {
+            1 | 2 => {
                 prg_bank_8000 = 0x0000;
                 prg_bank_A000 = 0x2000;
                 prg_bank_C000 = (1024 * 16) * (rom_banks as usize - 1);

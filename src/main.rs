@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 // use std::sync::mpsc::channel;
 // use std::sync::mpsc::Receiver;
 // use time;
-use std::rc::Rc;
 
 use std::env;
 use std::fmt;
@@ -86,6 +85,8 @@ fn main() {
     };
 
     // let (tx, rx) = channel();
+
+
 
     let cart = cart::Cart::new(&rompath);
     println!("{:#?}", cart);
