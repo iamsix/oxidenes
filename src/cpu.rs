@@ -204,8 +204,9 @@ impl CPU {
     }
 
     pub fn irq (&mut self) {
+        // println!("IRQ test");
         if !self.status_reg.interrupt_disable {
-            println!("APU IRQ");
+            // println!("IRQ");
             let hi = (self.program_counter >> 8) as u8;
             self.push_stack(hi);
             let lo = (0x00ff & self.program_counter) as u8;

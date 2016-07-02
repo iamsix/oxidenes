@@ -3,16 +3,16 @@ use cart;
 
 const PALETTE: [u32; 64] = [
     0x656565, 0x002D69, 0x131F7F, 0x3C137C, 0x600B62, 0x730A37, 0x710F07, 0x5A1A00,
-    0x342800, 0x0B3400, 0x003C00, 0x003D10, 0x003840, 0x000000, 0x000000, 0x000000,
+    0x342800, 0x0B3400, 0x003C00, 0x003D10, 0x003840, 0x010101, 0x010101, 0x010101,
 
     0xAEAEAE, 0x0F63B3, 0x4051D0, 0x7841CC, 0xA736A9, 0xC03470, 0xBD3C30, 0x9F4A00,
-    0x6D5C00, 0x366D00, 0x077704, 0x00793D, 0x00727D, 0x000000, 0x000000, 0x000000,
+    0x6D5C00, 0x366D00, 0x077704, 0x00793D, 0x00727D, 0x010101, 0x010101, 0x010101,
 
     0xFEFEFF, 0x5DB3FF, 0x8FA1FF, 0xC890FF, 0xF785FA, 0xFF83C0, 0xFF8B7F, 0xEF9A49,
-    0xBDAC2C, 0x85BC2F, 0x55C753, 0x3CC98C, 0x3EC2CD, 0x4E4E4E, 0x000000, 0x000000,
+    0xBDAC2C, 0x85BC2F, 0x55C753, 0x3CC98C, 0x3EC2CD, 0x4E4E4E, 0x010101, 0x010101,
 
     0xFEFEFF, 0xBCDFFF, 0xD1D8FF, 0xE8D1FF, 0xFBCDFD, 0xFFCCE5, 0xFFCFCA, 0xF8D5B4,
-    0xE4DCA8, 0xCCE3A9, 0xB9E8B8, 0xAEE8D0, 0xAFE5EA, 0xB6B6B6, 0x000000, 0x000000,
+    0xE4DCA8, 0xCCE3A9, 0xB9E8B8, 0xAEE8D0, 0xAFE5EA, 0xB6B6B6, 0x010101, 0x010101,
 ];
 
 
@@ -256,50 +256,7 @@ impl PPU {
         // println!("write PPUDATA {:#x} at virtual addr {:#X}", data, self.vram_addr);
         match v_addr {
             0x0000...0x1FFF => self.chr.write_u8(v_addr, data),
-            0x2000...0x2FFF => {
-
-                let realaddr = match self.vram_addr & 0x2C00 {
-                    0x2000 => {
-                        (v_addr - 0x2000) as usize
-                    }
-                    0x2400 => {
-                        if self.chr.vertical_mirroring {
-                            (v_addr - 0x2000) as usize
-                        } else if self.chr.horizontal_mirroring {
-                            (v_addr - 0x2000) as usize - 0x400
-                        } else if self.chr.four_screen_vram {
-                            (v_addr - 0x2000) as usize
-                        } else {
-                            panic!("Unknown mirroring mode 0x2400 write (single screen?)")
-                        }
-                    }
-                    0x2800 => {
-                        if self.chr.vertical_mirroring {
-                            (v_addr - 0x2000) as usize - 0x800
-                        } else if self.chr.horizontal_mirroring {
-                            (v_addr - 0x2000) as usize - 0x400
-                        } else if self.chr.four_screen_vram {
-                            (v_addr - 0x2000) as usize
-                        } else {
-                            panic!("Unknown mirroring mode 0x2800 write (single screen?)")
-                        }
-                    }
-                    0x2C00 => {
-                        if self.chr.vertical_mirroring {
-                            (v_addr - 0x2000) as usize - 0x800
-                        } else if self.chr.horizontal_mirroring {
-                            (v_addr - 0x2000) as usize - 0x800
-                        } else if self.chr.four_screen_vram {
-                            (v_addr - 0x2000) as usize
-                        } else {
-                            panic!("Unknown mirroring mode 0x2c00 write (single screen?)")
-                        }
-                    }
-                    _ => panic!("Invalid vram address (write)")
-                };
-
-                self.vram[realaddr] = data;
-            }
+            0x2000...0x2FFF => self.vram[self.map_vram(v_addr)] = data,
             0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
             0x3F00...0x3FFF => {
                 let mut realaddr = (self.vram_addr - 0x3F00) % 0x20;
@@ -320,53 +277,10 @@ impl PPU {
     }
 
     fn read_data(&self, addr: u16) -> u8 {
-//        println!("read from {:#X}", addr);
-
+        //        println!("read from {:#X}", addr);
         match addr {
             0x0000...0x1FFF => self.chr.read_u8(addr),
-            0x2000...0x2FFF => {
-                let realaddr = match addr & 0x2C00 {
-                    0x2000 => {
-                        (addr - 0x2000) as usize
-                    }
-                    0x2400 => {
-                        if self.chr.vertical_mirroring {
-                            (addr - 0x2000) as usize
-                        } else if self.chr.horizontal_mirroring {
-                            (addr - 0x2000) as usize - 0x400
-                        } else if self.chr.four_screen_vram {
-                            (addr - 0x2000) as usize
-                        } else {
-                            panic!("Unknown mirroring mode 0x2400 read (single screen?)")
-                        }
-                    }
-                    0x2800 => {
-                        if self.chr.vertical_mirroring {
-                            (addr - 0x2000) as usize - 0x800
-                        } else if self.chr.horizontal_mirroring {
-                            (addr - 0x2000) as usize - 0x400
-                        } else if self.chr.four_screen_vram {
-                            (addr - 0x2000) as usize
-                        } else {
-                            panic!("Unknown mirroring mode 0x2800 read (single screen?)")
-                        }
-                    }
-                    0x2C00 => {
-                        if self.chr.vertical_mirroring {
-                            (addr - 0x2000) as usize - 0x800
-                        } else if self.chr.horizontal_mirroring {
-                            (addr - 0x2000) as usize - 0x800
-                        } else if self.chr.four_screen_vram {
-                            (addr - 0x2000) as usize
-                        } else {
-                            panic!("Unknown mirroring mode 0x2c000 read (single screen?)")
-                        }
-                    }
-                    _ => panic!("Invalid vram address (read)")
-                };
-
-                self.vram[realaddr]
-            }
+            0x2000...0x2FFF => self.vram[self.map_vram(addr)],
             0x3000...0x3EFF => panic!("Need mirrors of 0x2000-0x2EFF"),
             0x3F00...0x3FFF => {
                 let mut realaddr = (addr - 0x3F00) % 0x20;
@@ -377,6 +291,24 @@ impl PPU {
             }
             _ => panic!("need mirrors of all vram")
 
+        }
+    }
+
+    fn map_vram (&self, addr: u16) -> usize {
+        if self.chr.vertical_mirroring {
+            (addr & 0x7FF) as usize
+        } else if self.chr.horizontal_mirroring {
+            if addr < 0x2800 {
+                (addr & 0x3FF) as usize
+            } else {
+                (addr & 0x3FF | 0x400) as usize
+            }
+        } else if self.chr.four_screen_vram {
+            (addr - 0x2000) as usize
+        } else { // single screen??
+            (addr & 0x3FF) as usize
+            // TODO: this will need more logic I think
+            // panic!("Unknown mirroring mode read/write (single screen?)")
         }
     }
 
@@ -406,7 +338,8 @@ impl PPU {
 
 
 
-    pub fn tick (&mut self, ticks: isize) -> bool {
+    pub fn tick (&mut self, ticks: isize) -> (bool, bool) {
+        // let mut irq = false;
         for _tick in 0..ticks {
             self.cycles += 1;
             if self.cycles == 341 {
@@ -426,6 +359,12 @@ impl PPU {
                 // println!("Frame# {}", self.framecount);
             }
 
+            if self.cycles == 260 && (self.show_bg || self.show_sprites) &&
+                                self.scanline > 0 && self.scanline < 241
+            {
+                self.chr.irq_clock();
+                return (false, self.chr.irq);
+            }
 
             if self.cycles == 1 {
                 if self.scanline == -1 {
@@ -465,8 +404,9 @@ impl PPU {
 
                 if self.cycles == 257 && (self.show_bg || self.show_sprites)
                 {
+                    // mux screen and sprites here?
+
                     self.increment_y();
-                    // println!("reset X");
                     // copy horizontal bits from t to v
                     self.vram_addr &= 0x7BE0;
                     self.vram_addr |= self.t_vram_addr & !0x7BE0;
@@ -489,9 +429,9 @@ impl PPU {
         if self.vblank && self.nmi_enable && !self.nmi_generated && self.cycles > 2 {
             // println!("NMI");
             self.nmi_generated = true;
-            return true;
+            return (true, self.chr.irq);
         }
-        return false;
+        return (false, self.chr.irq);
 
     }
 
@@ -550,11 +490,13 @@ impl PPU {
             if pixel_x <= 255 && pixel_x >= 0 {
                 px = 7 - px;
                 let pv = ((tile_data2 & (1 << px)) >> px) << 1 | (tile_data1 & (1 << px)) >> px;
-                if pv > 0 {
-                    let pixel = PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize % 64];
-                    self.screen[sl as usize][pixel_x as usize] = pixel;
-                    self.bg_prerender[pixel_x as usize] = pv;
-                }
+                let pixel = if pv > 0 {
+                    PALETTE[self.palette[pv as usize + (attr as usize * 4)] as usize % 64]
+                } else {
+                    PALETTE[self.palette[0] as usize % 64]
+                };
+                self.screen[sl as usize][pixel_x as usize] = pixel;
+                self.bg_prerender[pixel_x as usize] = pv;
             }
         }
         // let end = time::precise_time_ns();
@@ -622,12 +564,19 @@ impl PPU {
                     }
 
                     if (x as usize + px as usize <= 255) && pv > 0 {
-                        // TODO: This is actually wrong and shouldn't render on a 0 background value
-                        // regardless of colour (palette colour could be the same as bgcolor)
-                        // I would need the pre-render bg line to determine that
-                        // and I would need to render sprites only in the 8-pixel bg window
+
+                        // need to fix this http://wiki.nesdev.com/w/index.php/PPU_sprite_priority
+                        //  For each pixel in the background buffer, the corresponding sprite pixel
+                        // replaces it only if the sprite pixel is opaque and front priority or
+                        // if the background pixel is transparent.
+
+                        // maybe make sprite_line that contains [(px: u32, priority: bool); 256]
+                        // and combine the 2 at the end of each scanline?
+                        // make a completely separate sprite0 hit thing or integrate in to bg draw?
+
                         let bgpixel = self.screen[sl as usize][x as usize + px as usize];
-                        let pixel = if background && bgpixel != PALETTE[bgcolor] {
+                        // let pixel = if background && bgpixel != PALETTE[bgcolor] {
+                        let pixel = if background && self.bg_prerender[x as usize + px as usize] != 0 {
                             bgpixel
                         } else {
                             let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;

@@ -126,7 +126,8 @@ fn main() {
     device.resume();
     // println!("{:?}", device);
     // TODO: re-add specific run conditions for debugging
-    let mut nmi:bool;
+//    let mut nmi = false;
+//    let mut irq = false;
     let mut framestart = time::precise_time_ns();
     'main: loop {
 
@@ -142,7 +143,9 @@ fn main() {
         }
 
         cpu.cycle += instr.ticks as isize * PPU_MULTIPLIER;
-        nmi = cpu.bus.ppu.tick(instr.ticks as isize * PPU_MULTIPLIER);
+        let (nmi, mut irq) = cpu.bus.ppu.tick(instr.ticks as isize * PPU_MULTIPLIER);
+    //    nmi = nmit;
+    //    irq = irqt;
         if cpu.bus.ppu.extra_cycle {
             cpu.cycle += 1;
             cpu.bus.ppu.extra_cycle = false;
@@ -182,19 +185,22 @@ fn main() {
                 cpu.bus.joy.set_keys(keys);
             }
         }
+        irq |= cpu.bus.apu.tick(instr.ticks as isize, &cpu.bus.cart);
+//        irq |= cpu.bus.cart.irq_clock(instr.ticks as isize * PPU_MULTIPLIER, cpu.bus.ppu.scanline);
 
         cpu.execute_op(&op, &instr);
 
         // TODO: IRQ from apu
-        let mut irq = cpu.bus.apu.tick(instr.ticks as isize, &cpu.bus.cart);
 
         if nmi {
             //    println!("NMI");
             cpu.nmi();
             cpu.bus.ppu.tick(7 * PPU_MULTIPLIER);
-            irq = cpu.bus.apu.tick(7, &cpu.bus.cart);
+            irq |= cpu.bus.apu.tick(7, &cpu.bus.cart);
+//            irq |= cpu.bus.cart.irq_clock(7 * PPU_MULTIPLIER, cpu.bus.ppu.scanline);
         }
         if irq {
+//            println!("IRQ potentially generated");
             cpu.irq();
         }
     }

@@ -28,7 +28,12 @@ pub struct ChrRom {
     chr_bank_1800: usize,
     chr_bank_1C00: usize,
 
-    bank: u8,
+
+    pub irq: bool,
+    irq_latch: u8,
+    irq_counter: u8,
+    irq_enabled: bool,
+    irq_reload_flag: bool,
 }
 
 // TODO: separate rom_file reads to read only the relevant parts
@@ -60,7 +65,11 @@ impl ChrRom {
             chr_bank_1800: 0x1800,
             chr_bank_1C00: 0x1C00,
 
-            bank: 0,
+            irq: false,
+            irq_latch: 0,
+            irq_counter: 0,
+            irq_enabled: false,
+            irq_reload_flag: false,
         };
 
         if chr.chr_rom_banks != 0 {
@@ -143,6 +152,38 @@ impl ChrRom {
             _ => panic!("There aren't that many 2kb windows in chr"),
         }
     }
+
+    pub fn switch_1kb_bank (&mut self, bank: u8, window: u8) {
+        match window {
+            0 => self.chr_bank_0000 = bank as usize * 0x400,
+            1 => self.chr_bank_0400 = bank as usize * 0x400,
+            2 => self.chr_bank_0800 = bank as usize * 0x400,
+            3 => self.chr_bank_0C00 = bank as usize * 0x400,
+            4 => self.chr_bank_1000 = bank as usize * 0x400,
+            5 => self.chr_bank_1400 = bank as usize * 0x400,
+            6 => self.chr_bank_1800 = bank as usize * 0x400,
+            7 => self.chr_bank_1C00 = bank as usize * 0x400,
+            _ => panic!("There aren't that many 1kb windows in chr"),
+        }
+    }
+
+    // ppu clocks mapper 4 for me.
+    pub fn irq_clock (&mut self) -> bool {
+        if self.mapper == 4 {
+            if self.irq_counter == 0 && self.irq_enabled {
+                self.irq_counter = self.irq_latch - 1;
+                self.irq = true;
+//                return true
+            } else if self.irq_reload_flag || self.irq_counter == 0 {
+                self.irq_reload_flag = false;
+                self.irq_counter = self.irq_latch - 1;
+            }
+
+            self.irq_counter -= 1;
+        }
+        return self.irq;
+    }
+
 }
 
 // not sure how I'm going to do more complex mppers here...
@@ -169,10 +210,13 @@ pub struct Cart {
 
     // used by mappers - not as nice as names but works as long as I keep them straight
     // I'll have to see if there's a better way to do this
-    generic_registers: [u8; 10],
+    generic_registers: [u8; 32],
     last_write_addr: u16,
 
 }
+
+// TODO: Change horizontal/vertical/single/4screen to an enum
+// and decide who owns that enum (probably chr since ppu uses it)
 
 impl Cart {
     pub fn new(rompath: &String) -> Cart {
@@ -195,7 +239,8 @@ impl Cart {
                     prg_bank_E000 = 0x6000;
                 }
             }
-            1 | 2 => {
+            1 | 2 | 4 => {
+                // technically first bank is undefined on mmc3 but it doesn't matter
                 prg_bank_8000 = 0x0000;
                 prg_bank_A000 = 0x2000;
                 prg_bank_C000 = (1024 * 16) * (rom_banks as usize - 1);
@@ -224,7 +269,7 @@ impl Cart {
             prg_bank_C000: prg_bank_C000,
             prg_bank_E000: prg_bank_E000,
 
-            generic_registers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            generic_registers: [0; 32],
             last_write_addr: 0x0,
         }
     }
@@ -244,11 +289,10 @@ impl Cart {
                     1 => self.mmc1_write(addr, value, chr),
                     2 => {
                         let bank = (value & 0xF) as usize;
-                        // println!("mapper 2 Select bank {} on lower", bank);
-                        self.prg_bank_8000 = bank * (1024 * 16);
-                        self.prg_bank_A000 = (bank * (1024 * 16)) + 0x2000;
+                        self.set_16kb_prg_bank(bank, true);
                     },
                     3 => chr.switch_8kb_bank(value & 0xF),
+                    4 => self.mmc3_write(addr, value, chr),
                     _ => panic!("Mapper {} is unimplemented", self.mapper),
                 }
             }
@@ -258,11 +302,119 @@ impl Cart {
 
     }
 
-    // fn set_16kb_prg_bank (&mut self, bank: u8, upper_bank: bool) {}
-    // fn set_32kb_prg_bank (&mut self, bank: u8) {}
+    // fn irq_check?? - not sure if all irqs work the same or if I should generic_registers it
+
+    fn set_8kb_prg_bank (&mut self, bank: usize, window: u8) {
+        match window {
+            0 => self.prg_bank_8000 = (1024 * 8) * bank,
+            1 => self.prg_bank_A000 = (1024 * 8) * bank,
+            2 => self.prg_bank_C000 = (1024 * 8) * bank,
+            3 => self.prg_bank_E000 = (1024 * 8) * bank,
+            _ => panic!("there's no that many 8kb prg windows")
+        }
+    }
+
+    fn set_16kb_prg_bank (&mut self, bank: usize, lower_window: bool) {
+        if lower_window {
+            self.prg_bank_8000 = (1024 * 16) * bank;
+            self.prg_bank_A000 = ((1024 * 16) * bank) + 0x2000;
+        } else {
+            self.prg_bank_C000 = (1024 * 16) * bank;
+            self.prg_bank_E000 = ((1024 * 16) * bank) + 0x2000;
+        }
+    }
+
+    fn set_32kb_prg_bank (&mut self, bank: usize) {
+        self.prg_bank_8000 = bank * (1024 * 32);
+        self.prg_bank_A000 = bank * (1024 * 32) + 0x2000;
+        self.prg_bank_C000 = bank * (1024 * 32) + 0x4000;
+        self.prg_bank_E000 = bank * (1024 * 32) + 0x6000;
+    }
+
+    fn mmc3_write (&mut self, addr: u16, value: u8, chr: &mut ChrRom) {
+        // 0 - R0
+        // 1 - R1
+        // ...
+        // 7 - R7
+        // 31 = Bank select  (control)
+        match addr & 0xE000 {
+            0x8000 => {
+                // the meat of the mapper...
+                if addr % 2 == 0 {
+                    self.generic_registers[31] = value;
+                } else {
+                    let bankmode = self.generic_registers[31] & 0x7;
+                    self.generic_registers[bankmode as usize] = value;
+                }
+                let reg = self.generic_registers;
+
+                let prgmode = self.generic_registers[31] & 0x40;
+                if prgmode == 0 {
+                    self.set_8kb_prg_bank(reg[6] as usize & 0x3F, 0);
+                    self.set_8kb_prg_bank(reg[7] as usize & 0x3F, 1);
+                    let lastbank = self.prg_rom_banks as usize - 1;
+                    self.set_16kb_prg_bank(lastbank, false);
+                } else {
+                    // 8kb banks instead of 16kb banks specified by rom header
+                    let lastbank = ((self.prg_rom_banks * 2) - 1) as usize;
+                    self.set_8kb_prg_bank((lastbank - 1), 0);
+                    self.set_8kb_prg_bank(reg[7] as usize & 0x3F, 1);
+                    self.set_8kb_prg_bank(reg[6] as usize & 0x3F, 2);
+                    self.set_8kb_prg_bank(lastbank, 3);
+                }
+
+
+                let chrmode = self.generic_registers[31] & 0x80;
+                if chrmode == 0 {
+                    chr.switch_1kb_bank(reg[0] & 0xFE, 0);
+                    chr.switch_1kb_bank(reg[0] | 1, 1);
+                    chr.switch_1kb_bank(reg[1] & 0xFE, 2);
+                    chr.switch_1kb_bank(reg[1] | 1, 3);
+                    chr.switch_1kb_bank(reg[2], 4);
+                    chr.switch_1kb_bank(reg[3], 5);
+                    chr.switch_1kb_bank(reg[4], 6);
+                    chr.switch_1kb_bank(reg[5], 7);
+                } else {
+                    chr.switch_1kb_bank(reg[2], 0);
+                    chr.switch_1kb_bank(reg[3], 1);
+                    chr.switch_1kb_bank(reg[4], 2);
+                    chr.switch_1kb_bank(reg[5], 3);
+                    chr.switch_1kb_bank(reg[0] & 0xFE, 4);
+                    chr.switch_1kb_bank(reg[0] | 1, 5);
+                    chr.switch_1kb_bank(reg[1] & 0xFE, 6);
+                    chr.switch_1kb_bank(reg[1] | 1, 7);
+                }
+            }
+            0xA000 => {
+                if addr % 2 == 0 {
+                    self.horizontal_mirroring = (value & 1) == 1;
+                    chr.horizontal_mirroring = self.horizontal_mirroring;
+                    self.vertical_mirroring = (value & 1) == 0;
+                    chr.vertical_mirroring = self.vertical_mirroring;
+                } else {
+                    // prg ram stuff... can be ignored pretty safely
+                }
+            }
+            0xC000 => {
+                if addr % 2 == 0 {
+                    chr.irq_latch = value;
+                } else {
+                    chr.irq_reload_flag = true;
+                }
+            }
+            0xE000 => {
+                if addr % 2 == 0 {
+                    chr.irq_enabled = false;
+                    chr.irq = false;
+                } else {
+                    chr.irq_enabled = true;
+                }
+            }
+            _ => panic!("Invalid address MMC3 write"),
+        }
+    }
 
     fn mmc1_write (&mut self, addr: u16, value: u8, chr: &mut ChrRom) {
-        // println!("wrote {:>8b} on {:#X}", value, addr);
         // 0 = load register
         // 1 = control register
         // 8 = load reg write counter
@@ -280,13 +432,11 @@ impl Cart {
             match addr {
                 // control
                 0x8000...0x9FFF => {
-                    // println!("before: h {} v {}", self.horizontal_mirroring, self.vertical_mirroring);
                     self.generic_registers[1] = self.generic_registers[0];
                     self.vertical_mirroring = self.generic_registers[1] & 3 == 2;
                     chr.vertical_mirroring = self.vertical_mirroring;
                     self.horizontal_mirroring = self.generic_registers[1] & 3 == 3;
                     chr.horizontal_mirroring = self.horizontal_mirroring;
-                    // println!("afer: h {} v {}", self.horizontal_mirroring, self.vertical_mirroring);
                     if (self.generic_registers[1] & 3) < 2 {
                         panic!("single screen mirroring");
                     }
@@ -298,7 +448,7 @@ impl Cart {
                         let bank = self.generic_registers[0];
                         chr.switch_4kb_bank(bank, true);
                     } else {
-                        let bank = self.generic_registers[0] >> 1;
+                        let bank = self.generic_registers[0] & 0xE;
                         chr.switch_8kb_bank(bank);
                     }
                 }
@@ -314,27 +464,20 @@ impl Cart {
                 // prg bank
                 0xE000...0xFFFF => {
                     let switchmode = (self.generic_registers[1] >> 2) & 3;
+                    let bank = (self.generic_registers[0] & 0xF) as usize;
                     if switchmode == 0 || switchmode == 1 {
                         // 32kb switch mode
-                        let bank = ((self.generic_registers[0] & 0xF) >> 1) as usize;
-                        self.prg_bank_8000 = bank * (1024 * 32);
-                        self.prg_bank_A000 = bank * (1024 * 32) + 0x2000;
-                        self.prg_bank_C000 = bank * (1024 * 32) + 0x4000;
-                        self.prg_bank_E000 = bank * (1024 * 32) + 0x6000;
+                        let bank = (self.generic_registers[0] & 0xE) as usize;
+                        self.set_32kb_prg_bank(bank);
                     }
                     if switchmode == 2 {
-                        let bank = (self.generic_registers[0] & 0xF) as usize;
-                        self.prg_bank_8000 = 0;
-                        self.prg_bank_A000 = 0x2000;
-                        self.prg_bank_C000 = (1024 * 16) * bank;
-                        self.prg_bank_E000 = ((1024 * 16) * bank) + 0x2000;
+                        self.set_16kb_prg_bank(0, true);
+                        self.set_16kb_prg_bank(bank, false);
                     }
                     if switchmode == 3 {
-                        let bank = (self.generic_registers[0] & 0xF) as usize;
-                        self.prg_bank_8000 = (1024 * 16) * bank;
-                        self.prg_bank_A000 = ((1024 * 16) * bank) + 0x2000;
-                        self.prg_bank_C000 = (1024 * 16) * (self.prg_rom_banks as usize - 1);
-                        self.prg_bank_E000 = ((1024 * 16) * (self.prg_rom_banks as usize - 1)) + 0x2000;
+                        self.set_16kb_prg_bank(bank, true);
+                        let lastbank = self.prg_rom_banks as usize - 1;
+                        self.set_16kb_prg_bank(lastbank, false);
                     }
                 }
 
