@@ -448,7 +448,8 @@ impl Cart {
                         let bank = self.generic_registers[0];
                         chr.switch_4kb_bank(bank, true);
                     } else {
-                        let bank = self.generic_registers[0] & 0xE;
+                        let bank = self.generic_registers[0] >> 1;
+                        println!("8kb bank switch mmc1 to {}", bank);
                         chr.switch_8kb_bank(bank);
                     }
                 }

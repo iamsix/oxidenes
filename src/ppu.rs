@@ -384,20 +384,20 @@ impl PPU {
                 if self.cycles == 0 && self.show_bg {
                     let bgcolor = PALETTE[self.palette[0] as usize % 64];
                     self.screen[self.scanline as usize] = [bgcolor; 256];
-                    self.sprite0_prerender = [0; 8];
                     if !self.sprite0_hit && self.show_bg && self.show_sprites {
+                        self.sprite0_prerender = [0; 8];
                         self.bg_prerender = [0; 256];
                     }
-                    if self.show_sprites {
-                        self.sprite_render = [(0, false); 256];
-                        self.render_sprites();
-                    }
+                    self.sprite_render = [(0, false); 256];
                 }
 
 
                 if self.cycles <= 256 && self.cycles % 8 == 0 && self.show_bg {
                     self.render_8pxbg();
                     self.bg_column += 1;
+                    if self.show_sprites {
+                        self.render_sprites();
+                    }
                 }
 
                 if self.cycles > 2 && self.sprite0_to_be_hit {
@@ -457,9 +457,7 @@ impl PPU {
 
         let coarsex = self.vram_addr & 0x1F;
         let coarsey = (self.vram_addr >> 5) & 0x1F;
-        // let col = coarsex;
-        // let sl = ((coarsey << 3) | self.vram_addr >> 12) as i16;
-        // println!("sl {} and sl-y {} coarsex {}", self.scanline, sl, coarsex);
+
         let sl = self.scanline;
         let att_tbl_addr = 0x23C0 |
                             (self.vram_addr & 0x0C00) |
@@ -496,7 +494,7 @@ impl PPU {
         for mut px in 0..8 {
             let pixel_x = (self.bg_column * 8) - self.fine_x as isize + px as isize;
         //    println!("PixelX {}", pixel_x);
-            if pixel_x <= 255 && pixel_x >= 0 {
+            if pixel_x <= 255 && pixel_x >= 0 && (self.bg_left_8px || (!self.bg_left_8px && pixel_x > 7)){
                 px = 7 - px;
                 let pv = ((tile_data2 & (1 << px)) >> px) << 1 | (tile_data1 & (1 << px)) >> px;
                 let pixel = if pv > 0 {
@@ -507,7 +505,8 @@ impl PPU {
 
                 if pv > 0 &&
                     pixel_x as u8 >= self.oam[3] &&
-                    pixel_x as u8 <= (self.oam[3] + 7) &&
+                    pixel_x <= (self.oam[3] as isize + 7) &&
+                    pixel_x < 255 &&
                     self.sprite0_prerender[(pixel_x - self.oam[3] as isize) as usize] != 0
                 {
                     self.sprite0_to_be_hit = true;
@@ -572,7 +571,7 @@ impl PPU {
                     sprite_data1 = self.read_data(index + 8 + offset as u16);;
                     sprite_data2 = self.read_data(index + 16 + offset as u16);;
                 }
-                let bgcolor = self.palette[0] as usize % 64;
+
                 for px in 0..8 {
                     let pv:u8;
                     if flip_h {
@@ -581,27 +580,15 @@ impl PPU {
                         pv = ((sprite_data2 & (1 << 7 - px)) >> 7 - px) << 1 | (sprite_data1 & (1 << 7 - px)) >> 7 - px;
                     }
 
-                    if (x as usize + px as usize <= 255) && pv > 0 {
+                    let pixel_x = x as usize + px as usize;
 
-                        // need to fix this http://wiki.nesdev.com/w/index.php/PPU_sprite_priority
-                        //  For each pixel in the background buffer, the corresponding sprite pixel
-                        // replaces it only if the sprite pixel is opaque and front priority or
-                        // if the background pixel is transparent.
+                    if (pixel_x <= 255) && pv > 0 &&
+                       (self.sprite_left_8px || (!self.sprite_left_8px && (pixel_x > 7))){
 
-                        // maybe make sprite_line that contains [(px: u32, priority: bool); 256]
-                        // and combine the 2 at the end of each scanline?
-                        // make a completely separate sprite0 hit thing or integrate in to bg draw?
-
-                        let bgpixel = self.screen[sl as usize][x as usize + px as usize];
-                        // let pixel = if background && bgpixel != PALETTE[bgcolor] {
-                        let pixel = if background && self.bg_prerender[x as usize + px as usize] != 0 {
-                            0
-                        } else {
-                            let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
-                            PALETTE[plt % 64]
-                        };
+                        let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
+                        let pixel = PALETTE[plt % 64];
                         self.sprite_render[x as usize + px as usize] = (pixel, background);
-                        // self.screen[sl as usize][x as usize + px as usize] = pixel;
+
                         if sprite == 0 && !self.sprite0_hit && (x as usize + px as usize) < 255 {
                             self.sprite0_prerender[px]  = pv
                         }
