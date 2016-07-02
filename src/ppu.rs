@@ -43,13 +43,10 @@ pub struct PPU {
     sprite0_to_be_hit: bool,
     pub vblank: bool,
 
-    // ppu_addr: u16,
     oam_addr: u8,
 
     oam: Box<[u8]>,
 
-    // scroll_x: u8,
-    // scroll_y: u8,
     vram_addr: u16,
     t_vram_addr: u16,
     fine_x: u8,
@@ -67,6 +64,8 @@ pub struct PPU {
     nmi_generated: bool,
 
     bg_prerender: [u8; 256],
+    sprite0_prerender: [u8; 8],
+    sprite_render: [(u32, bool); 256],
 
     pub screen: [[u32; 256]; 240],
 
@@ -132,6 +131,9 @@ impl PPU {
 
             screen: [[0; 256]; 240],
             bg_prerender: [0; 256],
+            sprite0_prerender: [0; 8],
+            sprite_render: [(0, false); 256],
+            // sprite0_prerender: [(0, false); 256],
 
             framecount: 0,
             extra_cycle: false,
@@ -382,17 +384,19 @@ impl PPU {
                 if self.cycles == 0 && self.show_bg {
                     let bgcolor = PALETTE[self.palette[0] as usize % 64];
                     self.screen[self.scanline as usize] = [bgcolor; 256];
+                    self.sprite0_prerender = [0; 8];
                     if !self.sprite0_hit && self.show_bg && self.show_sprites {
                         self.bg_prerender = [0; 256];
+                    }
+                    if self.show_sprites {
+                        self.sprite_render = [(0, false); 256];
+                        self.render_sprites();
                     }
                 }
 
 
                 if self.cycles <= 256 && self.cycles % 8 == 0 && self.show_bg {
                     self.render_8pxbg();
-                    if self.show_sprites {
-                        self.render_sprites();
-                    }
                     self.bg_column += 1;
                 }
 
@@ -405,7 +409,12 @@ impl PPU {
                 if self.cycles == 257 && (self.show_bg || self.show_sprites)
                 {
                     // mux screen and sprites here?
-
+                    for x in 0..256 {
+                        let (px, background) = self.sprite_render[x];
+                        if px != 0 && (!background || (background && self.bg_prerender[x] == 0)) {
+                            self.screen[self.scanline as usize][x] = px;
+                        }
+                    }
                     self.increment_y();
                     // copy horizontal bits from t to v
                     self.vram_addr &= 0x7BE0;
@@ -495,6 +504,15 @@ impl PPU {
                 } else {
                     PALETTE[self.palette[0] as usize % 64]
                 };
+
+                if pv > 0 &&
+                    pixel_x as u8 >= self.oam[3] &&
+                    pixel_x as u8 <= (self.oam[3] + 7) &&
+                    self.sprite0_prerender[(pixel_x - self.oam[3] as isize) as usize] != 0
+                {
+                    self.sprite0_to_be_hit = true;
+                }
+
                 self.screen[sl as usize][pixel_x as usize] = pixel;
                 self.bg_prerender[pixel_x as usize] = pv;
             }
@@ -577,17 +595,15 @@ impl PPU {
                         let bgpixel = self.screen[sl as usize][x as usize + px as usize];
                         // let pixel = if background && bgpixel != PALETTE[bgcolor] {
                         let pixel = if background && self.bg_prerender[x as usize + px as usize] != 0 {
-                            bgpixel
+                            0
                         } else {
                             let plt = self.palette[pal as usize + (pv - 1) as usize] as usize;
                             PALETTE[plt % 64]
                         };
-                        self.screen[sl as usize][x as usize + px as usize] = pixel;
-                        if sprite == 0 && !self.sprite0_hit && (x as usize + px as usize) < 255 &&
-                             self.bg_prerender[x as usize + px as usize] != 0
-                        {
-                                self.sprite0_to_be_hit = true;
-
+                        self.sprite_render[x as usize + px as usize] = (pixel, background);
+                        // self.screen[sl as usize][x as usize + px as usize] = pixel;
+                        if sprite == 0 && !self.sprite0_hit && (x as usize + px as usize) < 255 {
+                            self.sprite0_prerender[px]  = pv
                         }
                     }
                 }
