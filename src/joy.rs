@@ -24,7 +24,6 @@ impl Joy {
         for key in keys {
             match key {
                 Keycode::LCtrl => {
-                    // panic!("Works..");
                     self.joy1 |= 1 << 0;
                 }
                 Keycode::LShift => {

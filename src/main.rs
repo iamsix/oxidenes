@@ -144,8 +144,7 @@ fn main() {
 
         cpu.cycle += instr.ticks as isize * PPU_MULTIPLIER;
         let (nmi, mut irq) = cpu.bus.ppu.tick(instr.ticks as isize * PPU_MULTIPLIER);
-    //    nmi = nmit;
-    //    irq = irqt;
+
         if cpu.bus.ppu.extra_cycle {
             cpu.cycle += 1;
             cpu.bus.ppu.extra_cycle = false;

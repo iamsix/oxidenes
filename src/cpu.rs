@@ -774,15 +774,6 @@ impl CPU {
             RAM_START...RAM_VIRTUAL_END => {
                 let addr = addr % RAM_LEN;
 
-/*              some mario cheats...
-                if addr == 0x075A {
-                    return 30 // lives
-                }
-                if addr == 0x079F {
-                    return 0xff // star
-                }
-                */
-
                 self.bus.ram[addr as usize]
             }
 
@@ -851,7 +842,13 @@ impl CPU {
             OAMADDR => self.bus.ppu.write_oamaddr(value),
             OAMDATA => self.bus.ppu.write_oamdata(value),
             PPUSCROLL => self.bus.ppu.write_ppuscroll(value),
-            PPUADDR => self.bus.ppu.write_ppuaddr(value),
+            PPUADDR => {
+                self.bus.ppu.write_ppuaddr(value);
+                    if self.bus.ppu.chr.irq {
+//                        println!("Extra irq");
+                        self.irq();
+                    }
+                },
             PPUDATA => self.bus.ppu.write_ppudata(value),
 
             APU_REGISTERS_START...APU_REGISTERS_END | FRAME_TIMER => {

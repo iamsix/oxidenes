@@ -34,6 +34,7 @@ pub struct ChrRom {
     irq_counter: u8,
     irq_enabled: bool,
     irq_reload_flag: bool,
+    last_irq_clock: isize,
 }
 
 // TODO: separate rom_file reads to read only the relevant parts
@@ -70,6 +71,7 @@ impl ChrRom {
             irq_counter: 0,
             irq_enabled: false,
             irq_reload_flag: false,
+            last_irq_clock: 0,
         };
 
         if chr.chr_rom_banks != 0 {
@@ -167,20 +169,26 @@ impl ChrRom {
         }
     }
 
+//    pub fn clock_irq (&mut self) -> bool {
+
+//    }
     // ppu clocks mapper 4 for me.
-    pub fn irq_clock (&mut self) -> bool {
+    pub fn irq_clock (&mut self, cur_ppu_clock: isize) -> bool {
+
+//        if self.mapper == 4 && (cur_ppu_clock - self.last_irq_clock >= 16) {
         if self.mapper == 4 {
-            if self.irq_counter == 0 && self.irq_enabled {
-                self.irq_counter = self.irq_latch - 1;
-                self.irq = true;
-//                return true
-            } else if self.irq_reload_flag || self.irq_counter == 0 {
-                self.irq_reload_flag = false;
-                self.irq_counter = self.irq_latch - 1;
+            if self.irq_counter == 0 {
+                self.irq_counter = self.irq_latch;
+            }  else {
+                self.irq_counter -= 1;
             }
 
-            self.irq_counter -= 1;
+            if self.irq_counter == 0 && self.irq_enabled {
+                self.irq = true;
+            }
+            return self.irq;
         }
+        self.last_irq_clock = cur_ppu_clock;
         return self.irq;
     }
 
@@ -350,17 +358,17 @@ impl Cart {
 
                 let prgmode = self.generic_registers[31] & 0x40;
                 if prgmode == 0 {
-                    self.set_8kb_prg_bank(reg[6] as usize & 0x3F, 0);
-                    self.set_8kb_prg_bank(reg[7] as usize & 0x3F, 1);
-                    let lastbank = self.prg_rom_banks as usize - 1;
-                    self.set_16kb_prg_bank(lastbank, false);
+                    let maxbanks = (self.prg_rom_banks * 2) as usize;
+                    self.set_8kb_prg_bank((reg[6] as usize & 0x3F) % maxbanks, 0);
+                    self.set_8kb_prg_bank((reg[7] as usize & 0x3F) % maxbanks, 1);
+                    self.set_16kb_prg_bank((maxbanks / 2) - 1, false);
                 } else {
                     // 8kb banks instead of 16kb banks specified by rom header
-                    let lastbank = ((self.prg_rom_banks * 2) - 1) as usize;
-                    self.set_8kb_prg_bank((lastbank - 1), 0);
-                    self.set_8kb_prg_bank(reg[7] as usize & 0x3F, 1);
-                    self.set_8kb_prg_bank(reg[6] as usize & 0x3F, 2);
-                    self.set_8kb_prg_bank(lastbank, 3);
+                    let lastbank = (self.prg_rom_banks * 2) as usize;
+                    self.set_8kb_prg_bank((lastbank - 2), 0);
+                    self.set_8kb_prg_bank((reg[7] as usize & 0x3F) % lastbank, 1);
+                    self.set_8kb_prg_bank((reg[6] as usize & 0x3F) % lastbank, 2);
+                    self.set_8kb_prg_bank(lastbank - 1, 3);
                 }
 
 
@@ -399,7 +407,7 @@ impl Cart {
                 if addr % 2 == 0 {
                     chr.irq_latch = value;
                 } else {
-                    chr.irq_reload_flag = true;
+                    chr.irq_counter = 0;
                 }
             }
             0xE000 => {

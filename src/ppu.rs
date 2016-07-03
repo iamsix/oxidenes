@@ -244,6 +244,11 @@ impl PPU {
             self.t_vram_addr &= 0xFF00;
             self.t_vram_addr |= data as u16;
 
+            if (self.vram_addr & 0x1000 == 0) && (self.t_vram_addr & 0x1000 == 0x1000) {
+                self.chr.irq_clock(self.cycles);
+                // println!("Edge IRQ");
+            }
+
             self.vram_addr = self.t_vram_addr;
             // self.ppu_addr |= data as u16;
         //    println!("PPUADDR set: {:#X} after sl {}", self.vram_addr, self.scanline);
@@ -341,7 +346,7 @@ impl PPU {
 
 
     pub fn tick (&mut self, ticks: isize) -> (bool, bool) {
-        // let mut irq = false;
+        let irq = false;
         for _tick in 0..ticks {
             self.cycles += 1;
             if self.cycles == 341 {
@@ -362,9 +367,9 @@ impl PPU {
             }
 
             if self.cycles == 260 && (self.show_bg || self.show_sprites) &&
-                                self.scanline > 0 && self.scanline < 241
+                                self.scanline >= -1 && self.scanline < 240
             {
-                self.chr.irq_clock();
+                self.chr.irq_clock(self.cycles);
                 return (false, self.chr.irq);
             }
 
@@ -438,9 +443,9 @@ impl PPU {
         if self.vblank && self.nmi_enable && !self.nmi_generated && self.cycles > 2 {
             // println!("NMI");
             self.nmi_generated = true;
-            return (true, self.chr.irq);
+            return (true, irq);
         }
-        return (false, self.chr.irq);
+        return (false, irq);
 
     }
 
