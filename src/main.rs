@@ -1,11 +1,13 @@
 extern crate sdl2;
 extern crate time;
+extern crate ringbuf;
 
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::keyboard::Keycode;
 use sdl2::event::Event;
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 use std::sync::{Arc, Mutex};
+use ringbuf::{RingBuffer, Consumer};
 // use std::sync::mpsc::channel;
 // use std::sync::mpsc::Receiver;
 // use time;
@@ -37,7 +39,8 @@ pub struct Bus {
 }
 
 pub struct ApuOut {
-    phase: Arc<Mutex<Vec<f32>>>,
+    rb: Consumer<f32>,
+//    phase: Arc<Mutex<Vec<f32>>>,
 //    rx: Receiver<f32>,
 }
 
@@ -51,8 +54,13 @@ impl AudioCallback for ApuOut {
         let mut buffer: f32;
         for x in out.iter_mut() {
             buffer = sample;
-            sample = self.phase.lock().unwrap().pop().unwrap_or(-1.0);
-            if sample == -1.0 {sample = buffer};
+            sample = if self.rb.is_empty() {
+                buffer 
+            } else {
+                self.rb.pop().unwrap()
+            };
+   //         sample = self.phase.lock().unwrap().pop().unwrap_or(-1.0);
+   //         if sample == -1.0 {sample = buffer};
             *x = sample;
 
         //    *x = self.rx.try_recv().unwrap_or(0.0);
@@ -71,8 +79,9 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut renderer = window.renderer().build().unwrap();
-    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24,
+    let mut renderer = window.into_canvas().build().unwrap();
+    let t_c = renderer.texture_creator();
+    let mut texture = t_c.create_texture_streaming(PixelFormatEnum::RGB24,
                                                         256,
                                                         240).unwrap();
     let mut events = sdl.event_pump().unwrap();
@@ -84,6 +93,8 @@ fn main() {
         samples: Some(441),       // default sample size
     };
 
+    let rb = RingBuffer::<f32>::new(2048);
+    let (mut prod, mut cons) = rb.split();
     // let (tx, rx) = channel();
 
 
@@ -92,7 +103,7 @@ fn main() {
     println!("{:#?}", cart);
     let chr_rom = cart::ChrRom::new(&rompath);
     // let apu = apu::APU::new(tx);
-    let apu = apu::APU::new();
+    let apu = apu::APU::new(prod);
 
 
     let ppu = ppu::PPU::new(chr_rom);
@@ -119,7 +130,8 @@ fn main() {
 
         // initialize the audio callback
         ApuOut {
-            phase: cpu.bus.apu.output.clone(),
+            rb: cons,
+//            phase: cpu.bus.apu.output.clone(),
         //    rx: rx,
         }
     }).unwrap();
@@ -288,7 +300,7 @@ fn cpu_debug (op: &u8, instr: &opcodes::Instruction, cpu: &cpu::CPU) {
 
 
 fn render_frame(screen: &[[u32; 256]; 240],
-                renderer: &mut sdl2::render::Renderer,
+                renderer: &mut sdl2::render::Canvas<sdl2::video::Window>,
                 texture: &mut sdl2::render::Texture,
                 // events: &mut sdl2::EventPump,
                 )

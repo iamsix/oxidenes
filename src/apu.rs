@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 // use std::sync::mpsc::Sender;
 use cart::Cart;
+use ringbuf::Producer;
 
 const LEN_TABLE: [u8;32] = [
     10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
@@ -24,7 +25,8 @@ pub struct APU {
     pulse_mix_table: [f32; 31],
     tri_noise_dmc_mix_table: [f32; 203],
 
-    pub output: Arc<Mutex<Vec<f32>>>,
+    pub output: Producer<f32>,
+//    pub output: Arc<Mutex<Vec<f32>>>,
 //    output2: Sender<f32>,
 }
 
@@ -37,7 +39,8 @@ const STEP5: usize = 37281;
 
 impl APU {
     // pub fn new(tx: Sender<f32>) -> APU {
-    pub fn new() -> APU {
+    // pub fn new() -> APU {
+    pub fn new(prod: Producer<f32>) -> APU {
         let triangle = Triangle::new();
         let pulse1 = Pulse::new(true);
         let pulse2 = Pulse::new(false);
@@ -71,7 +74,8 @@ impl APU {
             pulse_mix_table: pmt,
             tri_noise_dmc_mix_table: tndmt,
 
-            output: Arc::new(Mutex::new(Vec::new())),
+            //output: Arc::new(Mutex::new(Vec::new())),
+            output: prod,
             // output2: tx,
         }
     }
@@ -127,7 +131,8 @@ impl APU {
                                 2 * self.noise.output as usize +
                                 self.dmc.output // DMC is not multiplied
                             ];
-                self.output.lock().unwrap().insert(0, output);
+//                self.output.lock().unwrap().insert(0, output);
+                self.output.push(output);
                 // self.output2.send(output);
             }
 
